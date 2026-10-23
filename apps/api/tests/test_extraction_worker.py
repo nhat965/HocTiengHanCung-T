@@ -108,9 +108,11 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
         if stage == "raw_persistence":
             original_error = getattr(error, "orig", error)
             diagnostic = getattr(original_error, "diag", None)
+            parameters = getattr(error, "params", None)
             failure_diagnostics.update({
                 "error": type(error).__name__,
                 "cause": type(original_error).__name__,
+                "cause_module": type(original_error).__module__,
                 "sqlstate": (
                     getattr(original_error, "sqlstate", None)
                     or getattr(original_error, "pgcode", None)
@@ -119,6 +121,11 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
                 "table_name": getattr(diagnostic, "table_name", None),
                 "column_name": getattr(diagnostic, "column_name", None),
                 "datatype_name": getattr(diagnostic, "datatype_name", None),
+                "parameter_types": (
+                    {key: type(value).__name__ for key, value in parameters.items()}
+                    if isinstance(parameters, dict)
+                    else None
+                ),
                 "statement": getattr(error, "statement", None),
             })
             print(f"Sanitized PostgreSQL failure metadata: {json.dumps(failure_diagnostics)}")
