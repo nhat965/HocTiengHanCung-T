@@ -66,6 +66,7 @@
 - Added generated-PDF integration coverage for Korean/Vietnamese vocabulary, grammar/example, reading, exercise/options/answer, listening/transcript, database persistence, API retrieval, re-import, rollback, and document deletion. Additional fixtures cover multi-column ordering, TOC/header filtering, rights enforcement, ownership, and stale-job recovery.
 - Latest local validation: **16 API tests passed**; Alembic SQLite upgrade → downgrade → upgrade passed; `git diff --check` passed. Dependency deprecation warnings remain.
 - Added PostgreSQL 16 CI service with Alembic round-trip and integration suite, plus dependency audits and frontend build. Docker is unavailable locally; PostgreSQL verification and CI result are **pending** until the workflow runs on the PR branch.
+- CI dependency audits found and prompted updates to vulnerable Next.js/PostCSS and FastAPI/Starlette/pytest versions. The PostgreSQL round-trip exposed a lingering `importstate` enum on downgrade; the migration now drops it, with a SQLite round-trip recheck passing. PostgreSQL CI must rerun these fixes.
 - The six textbook PDFs remain private, untracked, and unprocessed by this task. The generated-PDF test is not evidence of textbook extraction accuracy.
 
 ## Not yet verified

@@ -39,9 +39,12 @@ existing Next.js version. Next.js was upgraded to 16.4.3; the production audit
 now reports zero vulnerabilities, and the local production build passes. The
 Python audit also detected vulnerabilities in the pinned Starlette and pytest
 versions; FastAPI, Starlette, and pytest were upgraded, and the API suite passed
-against those versions locally.
-**The workflow rerun for the dependency fixes is pending; PostgreSQL validation
-is not yet claimed.**
+against those versions locally. CI then exposed a PostgreSQL downgrade/upgrade
+failure because the base migration left its enum type behind; the downgrade
+now explicitly removes that PostgreSQL type. SQLite migration round-trip
+passes with the fix.
+**The next PostgreSQL workflow run is pending; PostgreSQL validation is not yet
+claimed.**
 
 ## Known unverified behavior
 
