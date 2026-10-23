@@ -12,7 +12,7 @@ textbook data is included.
 
 | Check | Result |
 | --- | --- |
-| API test suite | **16 passed**, 6 dependency deprecation warnings |
+| API test suite (FastAPI 0.161.1, Starlette 1.9.0, pytest 9.0.3) | **16 passed**, 6 dependency deprecation warnings |
 | Generated-PDF worker → database → API integration | Passed as part of API suite |
 | Re-import/idempotency and approved-record preservation | Passed |
 | Structured-stage rollback on forced failure | Passed |
@@ -36,9 +36,12 @@ dependency audits, and the frontend production build. It must run successfully
 on the pushed PR branch before PostgreSQL or CI acceptance can be claimed.
 The initial run detected a vulnerable transitive PostCSS dependency under the
 existing Next.js version. Next.js was upgraded to 16.4.3; the production audit
-now reports zero vulnerabilities, and the local production build passes.
-**The workflow rerun for that fix is pending; PostgreSQL validation is not yet
-claimed.**
+now reports zero vulnerabilities, and the local production build passes. The
+Python audit also detected vulnerabilities in the pinned Starlette and pytest
+versions; FastAPI, Starlette, and pytest were upgraded, and the API suite passed
+against those versions locally.
+**The workflow rerun for the dependency fixes is pending; PostgreSQL validation
+is not yet claimed.**
 
 ## Known unverified behavior
 
