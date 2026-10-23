@@ -67,6 +67,7 @@ def _provenance(session: Session, kind: str, entity_id: int, span_id: int | None
         ContentProvenance.entity_id == entity_id,
         ContentProvenance.source_span_id == span_id,
         ContentProvenance.extraction_method == method,
+        ContentProvenance.extraction_version == version,
     ))
     if present is None:
         session.add(ContentProvenance(

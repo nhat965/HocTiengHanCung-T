@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from app.config import get_settings
@@ -6,7 +6,16 @@ from app.config import get_settings
 
 def build_engine(database_url: str):
     connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
-    return create_engine(database_url, connect_args=connect_args)
+    engine = create_engine(database_url, connect_args=connect_args)
+    if database_url.startswith("sqlite"):
+        @event.listens_for(engine, "connect")
+        def disable_driver_transaction_control(dbapi_connection, _connection_record) -> None:
+            dbapi_connection.isolation_level = None
+
+        @event.listens_for(engine, "begin")
+        def emit_sqlite_begin(connection) -> None:
+            connection.exec_driver_sql("BEGIN")
+    return engine
 
 
 engine = build_engine(get_settings().database_url)

@@ -31,6 +31,11 @@ class ImportJobResponse(BaseModel):
     id: int
     source_document_id: int
     state: ImportState
+    stage: str
+    failure_stage: str | None = None
+    attempts: int
+    max_attempts: int
+    record_counts: dict[str, int] | None = None
     message: str | None
     created_at: datetime
 

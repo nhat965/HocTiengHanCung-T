@@ -23,30 +23,40 @@ page text, block geometry, and candidate table rows; it does not persist image
 assets, page dimensions, span-level geometry/font metadata, or a raw JSON
 archive. The database is not a complete mirror of raw extraction output.
 
-Structured extraction can write fixture-derived records through the persistence
-service. Re-import is idempotent for tested entity keys and does not overwrite
-approved/reviewed rows. The structured CLI currently emits JSON/quality output;
-it is not connected to an automatic PDF-worker or API ingestion stage. No
-structured knowledge was extracted from the six supplied textbooks.
+The PDF worker persists the raw layer, runs structured extraction and
+validation, then writes structured records, provenance, counts, and quality
+summary before the import job enters `needs_review`. Re-import is idempotent
+for covered entity keys and does not overwrite approved/reviewed records.
+Unique database indexes protect lesson vocabulary/grammar keys, dialogue turns,
+exercise options, listening-track identifiers, and provenance. The standalone
+structured CLI emits private JSON/quality output but is not the database import
+path. No structured knowledge was extracted from the six supplied textbooks.
 
 ## Import state machine
 
-`registered → queued → extracting → extracted → needs_review → completed`
+`registered → queued → extracting → needs_review`
 
-`failed` may return to `queued` while `attempts < max_attempts`. Re-running a
-worker job upserts existing raw pages/blocks and does not delete lessons or
-review decisions.
+Each `ImportJob` also tracks a fine-grained stage:
+`rights_check`, `raw_extraction`, `raw_persistence`,
+`structured_extraction`, `validation`, `structured_persistence`,
+`quality_report`, and `complete`. Failures expose `failure_stage`. `failed` and
+`needs_review` jobs may be explicitly queued again while
+`attempts < max_attempts`. Stale `extracting` jobs are recovered after 60
+minutes on the next worker invocation.
 
-`extracted` means raw source text/block output exists. It does **not** mean
-source accuracy has been reviewed, table/image outputs were stored in the
-database, or every page was OCR processed. Structured fixture records are
-`pending`/`unverified` until a human review approves them.
+`needs_review` means raw and structured source-derived records and a quality
+summary have been persisted. It does **not** mean source accuracy has been
+reviewed, image assets were stored in the database, or every page was OCR
+processed. Records remain `pending`/`unverified` until a human review approves
+them. A structured-stage failure rolls back that stage; a previously committed
+raw layer remains retryable.
 
 ## Private-data boundary
 
 All private document APIs require bearer authentication and filter by the
 configured owner. This is a single-owner token model, not multi-user account
-management. `rights_status` defaults to `unverified`; raw API/worker extraction requires a
-user-declared `authorized` value, not independent legal verification.
-Storage isolation does not establish processing or redistribution rights. Use Alembic for schema
-changes; startup does not create or mutate the schema.
+management. `rights_status` defaults to `unverified`; raw API/worker extraction
+requires a user-declared `authorized` value, not independent legal
+verification. Storage isolation does not establish processing or
+redistribution rights. Use Alembic for schema changes; startup does not create
+or mutate the schema.

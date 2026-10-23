@@ -51,13 +51,43 @@ def ordered_blocks(page: dict[str, Any]) -> list[SourceBlock]:
     if not has_columns:
         return sorted(blocks, key=lambda block: (round(block.bbox[1], 1), block.bbox[0]))
 
-    def region(block: SourceBlock) -> int:
-        block_width = block.bbox[2] - block.bbox[0]
-        if width and block_width >= width * 0.68:
-            return -1
-        return 0 if (block.bbox[0] + block.bbox[2]) / 2 < width / 2 else 1
+    spanning = sorted(
+        (
+            block for block in blocks
+            if width and block.bbox[2] - block.bbox[0] >= width * 0.68
+        ),
+        key=lambda block: block.bbox[1],
+    )
+    ordered: list[SourceBlock] = []
+    previous_anchor_y = float("-inf")
 
-    return sorted(blocks, key=lambda block: (round(block.bbox[1], 1), region(block), block.bbox[0]))
+    def append_column_band(band: list[SourceBlock]) -> None:
+        for column in (0, 1):
+            column_blocks = [
+                block for block in band
+                if ((block.bbox[0] + block.bbox[2]) / 2 < width / 2) == (column == 0)
+            ]
+            ordered.extend(sorted(
+                column_blocks,
+                key=lambda block: (round(block.bbox[1], 1), block.bbox[0]),
+            ))
+
+    for anchor in spanning:
+        anchor_y = (anchor.bbox[1] + anchor.bbox[3]) / 2
+        band = [
+            block for block in blocks
+            if block not in spanning
+            and previous_anchor_y < (block.bbox[1] + block.bbox[3]) / 2 < anchor_y
+        ]
+        append_column_band(band)
+        ordered.append(anchor)
+        previous_anchor_y = anchor_y
+    append_column_band([
+        block for block in blocks
+        if block not in spanning
+        and (block.bbox[1] + block.bbox[3]) / 2 > previous_anchor_y
+    ])
+    return ordered
 
 
 def page_tables(page: dict[str, Any]) -> list[SourceTable]:

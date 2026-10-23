@@ -7,8 +7,51 @@ from sqlalchemy import func, select
 
 from app import database
 from app.models import Lesson, SourceBlock, SourceDocument, SourcePage, SourceSpan, Textbook, Vocabulary
+from app.services.knowledge.layout import SourceTable, ordered_blocks
 from app.services.knowledge.pipeline import extract_knowledge, write_knowledge_json
 from app.services.knowledge.persistence import persist_bundle
+from app.services.knowledge.vocabulary import extract_vocabulary
+
+
+def test_layout_orders_columns_and_preserves_full_width_anchors():
+    page = {
+        "pdf_page_number": 1,
+        "width": 600,
+        "height": 800,
+        "blocks": [
+            {"index": 0, "text": "Heading", "bbox": [20, 20, 580, 40]},
+            {"index": 1, "text": "left 1", "bbox": [30, 80, 260, 100]},
+            {"index": 2, "text": "right 1", "bbox": [330, 82, 560, 102]},
+            {"index": 3, "text": "left 2", "bbox": [30, 120, 260, 140]},
+            {"index": 4, "text": "right 2", "bbox": [330, 122, 560, 142]},
+            {"index": 5, "text": "Subheading", "bbox": [20, 180, 580, 200]},
+            {"index": 6, "text": "left 3", "bbox": [30, 220, 260, 240]},
+            {"index": 7, "text": "right 3", "bbox": [330, 222, 560, 242]},
+        ],
+    }
+
+    assert [block.text for block in ordered_blocks(page)] == [
+        "Heading", "left 1", "left 2", "right 1", "right 2",
+        "Subheading", "left 3", "right 3",
+    ]
+
+
+def test_vocabulary_pairs_repeated_korean_vietnamese_columns():
+    table = SourceTable(
+        page_number=12,
+        printed_page_number="11",
+        table_index=2,
+        bbox=(0, 0, 600, 400),
+        rows=[["사과", "quả táo", "가다", "đi"]],
+    )
+
+    records = extract_vocabulary([table])
+
+    assert [(item.headword, item.meanings_vi) for item in records] == [
+        ("사과", ["quả táo"]),
+        ("가다", ["đi"]),
+    ]
+    assert all(item.source.table_row_index == 0 for item in records)
 
 
 def test_lesson_detection_skips_toc_pages_and_running_headers():
@@ -56,6 +99,60 @@ def test_lesson_detection_skips_toc_pages_and_running_headers():
     assert [(item.start_pdf_page, item.end_pdf_page) for item in bundle.lessons] == [(3, 3)]
 
 
+def test_pipeline_excludes_contents_pages_and_repeated_running_headers():
+    raw = {
+        "source": {"page_count": 3},
+        "pages": [
+            {
+                "pdf_page_number": 1,
+                "width": 600,
+                "height": 800,
+                "blocks": [
+                    {"index": 0, "text": "목차", "bbox": [50, 20, 100, 40]},
+                    {"index": 1, "text": "GRAMMAR: fake || fake", "bbox": [50, 60, 300, 80]},
+                    {"index": 2, "text": "READING[fake]: fake", "bbox": [50, 90, 300, 110]},
+                ],
+                "tables": [],
+            },
+            {
+                "pdf_page_number": 2,
+                "width": 600,
+                "height": 800,
+                "blocks": [
+                    {"index": 0, "text": "01 유행", "bbox": [50, 120, 200, 140]},
+                    {
+                        "index": 1,
+                        "text": "GRAMMAR: running header || not content",
+                        "bbox": [50, 20, 300, 40],
+                        "is_header_footer_candidate": True,
+                    },
+                    {"index": 2, "text": "문법", "bbox": [50, 180, 120, 200]},
+                ],
+                "tables": [],
+            },
+            {
+                "pdf_page_number": 3,
+                "width": 600,
+                "height": 800,
+                "blocks": [
+                    {"index": 0, "text": "GRAMMAR: running header || not content", "bbox": [50, 20, 300, 40],
+                     "is_header_footer_candidate": True},
+                    {"index": 1, "text": "EXAMPLE: 문장을 씁니다. || Viết câu.", "bbox": [50, 180, 300, 200]},
+                ],
+                "tables": [],
+            },
+        ],
+    }
+
+    bundle = extract_knowledge(raw)
+
+    assert [item.ordinal for item in bundle.lessons] == [1]
+    assert not bundle.passages
+    assert not bundle.grammar
+    assert any("Skipped likely table-of-contents pages: 1" in warning for warning in bundle.warnings)
+    assert any("Filtered 1 repeated header/footer" in warning for warning in bundle.warnings)
+
+
 def test_extractors_create_source_linked_fixture_records(tmp_path: Path, client):
     raw = {
         "schema_version": 1,
@@ -89,9 +186,7 @@ def test_extractors_create_source_linked_fixture_records(tmp_path: Path, client)
                         "index": 0,
                         "bbox": [50, 50, 550, 120],
                         "rows": [
-                            ["Headword", "Meaning"],
-                            ["사과", "quả táo"],
-                            ["가다", "đi"],
+                            ["사과", "quả táo", "가다", "đi"],
                         ],
                     }
                 ],

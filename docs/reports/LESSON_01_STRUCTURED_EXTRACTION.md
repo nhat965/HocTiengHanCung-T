@@ -10,9 +10,9 @@ answers.
 
 ## Engine verification
 
-The structured extraction code was exercised with a two-page synthetic fixture
-containing Korean and Vietnamese examples and a two-column vocabulary table.
-The fixture produced:
+No textbook extraction is claimed. Engine behavior is checked using two
+permitted synthetic test inputs. The first is a two-page structured-data
+fixture with Korean and Vietnamese examples and a two-column vocabulary table:
 
 | Record | Count |
 | --- | ---: |
@@ -30,16 +30,27 @@ records point to source table rows. Re-import keeps the approved vocabulary
 record unchanged; a separate case checks that duplicate PDF page numbers do
 not silently attach provenance to the wrong source document.
 
+The end-to-end worker integration test also generates a one-page PDF in the
+test process and verifies extraction, validation, database persistence, and
+API retrieval. It produces 1 lesson, 2 vocabulary entries, 1 grammar pattern
+with 1 linked example sentence, 1 reading passage with 2 ordered paragraphs,
+1 exercise question with 2 options and 1 sourced answer, and 1 listening track
+with 1 matched transcript. Every persisted structured record has source-page
+provenance. Re-import produces no duplicates and leaves approved records
+unchanged; forced structured-stage failure rolls back derived records.
+
+API test execution covered rights checks, owner scoping, document deletion,
+stale-job recovery, multi-column reading order, and TOC/header filtering.
+
 ## Limitations
 
-- These counts are synthetic test results, not records extracted from the
+- All counts are synthetic test results, not records extracted from the
   textbook.
 - The rules are deterministic and marker/layout dependent; they require human
   review and have not been benchmarked against the supplied PDFs.
-- Structured JSON generation and quality reporting are available through the
-  private CLI. Automated structured ingestion from the PDF worker into
-  PostgreSQL is not yet wired.
-- PostgreSQL migration behavior and real-source visual verification are
-  outstanding. The migration was checked on temporary SQLite only.
+- The PDF worker now integrates structured extraction, validation, database
+  persistence, provenance, and quality reporting. Local end-to-end validation
+  used SQLite; PostgreSQL CI execution is pending.
+- Real-source visual verification is outstanding.
 - No copyrighted source text, PDF, or extraction output is included in this
   report or intended for Git.

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from pathlib import Path
+import re
 from typing import Any
 
 from app.services.knowledge.activities import extract_activities
@@ -14,15 +16,44 @@ from app.services.knowledge.segmentation import (
 from app.services.knowledge.types import ExtractionBundle
 from app.services.knowledge.vocabulary import extract_vocabulary
 
+_TOC_MARKER = re.compile(r"(?:목차|차례|mục\s*lục|contents)", re.I)
+
 
 def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
     """Run deterministic, opt-in extractors on a raw-export-shaped document."""
     bundle = ExtractionBundle()
     pages = sorted(raw_document.get("pages", []), key=lambda item: item["pdf_page_number"])
+    blocks_by_page = {
+        int(page["pdf_page_number"]): ordered_blocks(page)
+        for page in pages
+    }
+    toc_pages = {
+        page_number for page_number, blocks in blocks_by_page.items()
+        if any(_TOC_MARKER.search(block.text) for block in blocks)
+    }
+    header_page_occurrences: dict[str, set[int]] = defaultdict(set)
+    for page_number, blocks in blocks_by_page.items():
+        for block in blocks:
+            if block.is_header_footer_candidate:
+                header_page_occurrences[" ".join(block.text.casefold().split())].add(page_number)
+    repeated_running_text = {
+        text for text, page_numbers in header_page_occurrences.items()
+        if len(page_numbers) > 1
+    }
     all_blocks = []
     tables = []
     for page in pages:
-        all_blocks.extend(ordered_blocks(page))
+        page_number = int(page["pdf_page_number"])
+        if page_number in toc_pages:
+            continue
+        blocks = blocks_by_page[page_number]
+        all_blocks.extend(
+            block for block in blocks
+            if not (
+                block.is_header_footer_candidate
+                and " ".join(block.text.casefold().split()) in repeated_running_text
+            )
+        )
         tables.extend(page_tables(page))
     bundle.lessons = add_lesson_end_pages(
         detect_lessons(all_blocks),
@@ -39,6 +70,15 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
         bundle.transcripts,
     ) = extract_activities(all_blocks)
     bundle.warnings.extend(validate_bundle(bundle, {int(page["pdf_page_number"]) for page in pages}))
+    if toc_pages:
+        bundle.warnings.append(
+            "Skipped likely table-of-contents pages: "
+            + ", ".join(str(page_number) for page_number in sorted(toc_pages))
+        )
+    if repeated_running_text:
+        bundle.warnings.append(
+            f"Filtered {len(repeated_running_text)} repeated header/footer candidates"
+        )
     return bundle
 
 

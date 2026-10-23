@@ -38,7 +38,7 @@
 - Added provenance, extraction version, review status, idempotent persistence, and protected knowledge read endpoints.
 - Synthetic fixture verifies records and source-page links across two pages, including vocabulary, grammar/example, dialogue, reading, question/options/answer, and track/transcript matching.
 - TOC-page and running-header false positives are covered by a separate fixture test. Source-page provenance refuses ambiguous matches when multiple source PDFs share page numbers unless a source document ID is specified.
-- Structured JSON and quality report CLI output must remain beneath `PRIVATE_STORAGE_ROOT`. The CLI is not yet integrated with an automatic PDF worker/API database-ingestion step.
+- Structured JSON and quality report CLI output must remain beneath `PRIVATE_STORAGE_ROOT`. The standalone CLI is for inspection; the worker/API persistence integration was completed in Task 03.1 below.
 - No structured extraction has been run against the six local textbooks.
 
 ### Task 01C — Quality Control & Review
@@ -47,14 +47,6 @@
 - Transcript/track and answer/source linking are exercised with synthetic data; missing answers/transcripts are represented as missing rather than fabricated.
 - Review metadata and APIs support pending/review-status filtering; a complete human review interface is not implemented.
 
-
-## Not yet verified
-
-- Structured database ingestion through a production API/worker path.
-- Full-book extraction or structured knowledge extraction for any of the six books.
-- OCR fallback: Tesseract is unavailable in this environment.
-- PostgreSQL migrations against a live database. Alembic upgrade/downgrade/upgrade was verified on temporary SQLite only.
-- AI, authentication, TTS, and STT provider integrations.
 
 ## Task 03 — Private structured knowledge engine
 
@@ -65,3 +57,20 @@
 - Structured fixture acceptance output: 1 lesson, 2 vocabulary entries, 1 grammar pattern with 1 linked example sentence, 2 dialogue turns, 1 reading passage with 2 ordered paragraphs, an exercise group/question with 2 options and a sourced answer, and 1 listening track with a matched transcript. These are synthetic records, not book extraction results.
 - Validation: API suite **10 passed**; Alembic downgrade to base and upgrade to head passed on temporary SQLite. PostgreSQL is unavailable in this environment, so PostgreSQL compatibility remains unverified.
 - No PDF or extracted textbook content is included in this change.
+
+## Task 03.1 — End-to-end worker and reliability hardening
+
+- Connected the worker stages: rights check → raw PDF extraction and persistence → structured extraction → validation → structured persistence → persisted quality report.
+- Import jobs expose the active/failing stage, attempts, record counts, and quality summary. Stale `extracting` jobs are recovered after 60 minutes on a subsequent worker invocation, subject to the retry limit.
+- Structured persistence rolls back on mid-stage failure while retaining the committed raw layer for retry. Entity/provenance uniqueness constraints, idempotent upserts, and approved/reviewed-record preservation are covered by tests.
+- Added generated-PDF integration coverage for Korean/Vietnamese vocabulary, grammar/example, reading, exercise/options/answer, listening/transcript, database persistence, API retrieval, re-import, rollback, and document deletion. Additional fixtures cover multi-column ordering, TOC/header filtering, rights enforcement, ownership, and stale-job recovery.
+- Latest local validation: **16 API tests passed**; Alembic SQLite upgrade → downgrade → upgrade passed; `git diff --check` passed. Dependency deprecation warnings remain.
+- Added PostgreSQL 16 CI service with Alembic round-trip and integration suite, plus dependency audits and frontend build. Docker is unavailable locally; PostgreSQL verification and CI result are **pending** until the workflow runs on the PR branch.
+- The six textbook PDFs remain private, untracked, and unprocessed by this task. The generated-PDF test is not evidence of textbook extraction accuracy.
+
+## Not yet verified
+
+- PostgreSQL integration and migration behavior against a live server; CI is configured but has not yet reported a result.
+- Full-book extraction, real textbook layout accuracy, human review, and accuracy metrics for any of the six books.
+- OCR fallback: Tesseract is unavailable in this environment.
+- AI, TTS, and STT provider integrations.

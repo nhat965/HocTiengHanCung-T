@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, String, Table, Text, UniqueConstraint, Column
+from sqlalchemy import JSON, DateTime, Enum as SqlEnum, ForeignKey, Integer, String, Table, Text, UniqueConstraint, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -73,6 +73,10 @@ class ImportJob(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     max_attempts: Mapped[int] = mapped_column(Integer, default=3)
+    stage: Mapped[str] = mapped_column(String(32), default="registered")
+    failure_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    record_counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    quality_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_document: Mapped[SourceDocument] = relationship(back_populates="import_jobs")
 
 
@@ -155,6 +159,9 @@ class LessonSection(Base):
 
 class Vocabulary(Base):
     __tablename__ = "vocabulary"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "normalized_headword", name="uq_vocabulary_lesson_headword"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
     headword: Mapped[str] = mapped_column(String(255), index=True)
@@ -179,6 +186,9 @@ class WordSense(Base):
 
 class GrammarPattern(Base):
     __tablename__ = "grammar_patterns"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "normalized_pattern", name="uq_grammar_lesson_pattern"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
     pattern: Mapped[str] = mapped_column(String(255))
@@ -223,6 +233,9 @@ class Passage(Base):
 
 class Dialogue(Base):
     __tablename__ = "dialogues"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "group_identifier", name="uq_dialogues_lesson_group"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
@@ -232,6 +245,9 @@ class Dialogue(Base):
 
 class DialogueTurn(Base):
     __tablename__ = "dialogue_turns"
+    __table_args__ = (
+        UniqueConstraint("dialogue_id", "turn_index", name="uq_dialogue_turns_index"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     dialogue_id: Mapped[int] = mapped_column(ForeignKey("dialogues.id"), index=True)
     turn_index: Mapped[int] = mapped_column(Integer)
@@ -261,6 +277,9 @@ class Exercise(Base):
 
 class ExerciseOption(Base):
     __tablename__ = "exercise_options"
+    __table_args__ = (
+        UniqueConstraint("exercise_id", "option_index", name="uq_exercise_options_index"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     exercise_id: Mapped[int] = mapped_column(ForeignKey("exercises.id"), index=True)
     option_index: Mapped[int] = mapped_column(Integer)
@@ -271,6 +290,9 @@ class ExerciseOption(Base):
 
 class ListeningTrack(Base):
     __tablename__ = "listening_tracks"
+    __table_args__ = (
+        UniqueConstraint("lesson_id", "track_identifier", name="uq_listening_tracks_identifier"),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
@@ -315,6 +337,12 @@ class ContentReview(Base):
 
 class ContentProvenance(Base):
     __tablename__ = "content_provenance"
+    __table_args__ = (
+        UniqueConstraint(
+            "entity_type", "entity_id", "source_span_id", "extraction_method",
+            "extraction_version", name="uq_content_provenance_source_method_version",
+        ),
+    )
     id: Mapped[int] = mapped_column(primary_key=True)
     entity_type: Mapped[str] = mapped_column(String(64))
     entity_id: Mapped[int] = mapped_column(Integer)

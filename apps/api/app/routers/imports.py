@@ -48,6 +48,21 @@ from app.services.quality import build_quality_report
 router = APIRouter(prefix="/imports", tags=["imports"])
 
 
+def _job_response(job: ImportJob) -> ImportJobResponse:
+    return ImportJobResponse(
+        id=job.id,
+        source_document_id=job.source_document_id,
+        state=job.state,
+        stage=job.stage,
+        failure_stage=job.failure_stage,
+        attempts=job.attempts,
+        max_attempts=job.max_attempts,
+        record_counts=job.record_counts,
+        message=job.message,
+        created_at=job.created_at,
+    )
+
+
 @router.post("", response_model=ImportResponse, status_code=status.HTTP_202_ACCEPTED)
 def create_import(
     payload: ImportRequest,
@@ -151,7 +166,7 @@ def queue_import(
             detail="Mark document rights as authorized before queuing extraction",
         )
     job = queue_job(session, job)
-    return ImportJobResponse(id=job.id, source_document_id=job.source_document_id, state=job.state, message=job.message, created_at=job.created_at)
+    return _job_response(job)
 
 
 @router.get("/{job_id}", response_model=ImportJobResponse)
@@ -166,13 +181,7 @@ def get_import(
     ))
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
-    return ImportJobResponse(
-        id=job.id,
-        source_document_id=job.source_document_id,
-        state=job.state,
-        message=job.message,
-        created_at=job.created_at,
-    )
+    return _job_response(job)
 
 
 @router.get("/{job_id}/report")
@@ -187,7 +196,11 @@ def import_report(
     ))
     if job is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Import job not found")
-    return build_quality_report(session, job.source_document_id).__dict__
+    return {
+        "job": _job_response(job).model_dump(mode="json"),
+        "quality": job.quality_summary,
+        "raw_extraction": build_quality_report(session, job.source_document_id).__dict__,
+    }
 
 
 @router.delete("/documents/{document_id}", response_model=DeleteDocumentResponse)

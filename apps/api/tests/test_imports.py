@@ -60,6 +60,17 @@ def test_extraction_requires_explicit_authorized_rights(client, tmp_path):
         "volume_number": 1,
     }).json()
     assert client.post(f"/api/v1/imports/{unverified['job_id']}/queue").status_code == 403
+    from app.database import SessionLocal
+    from app.models import ImportJob, ImportState, SourcePage
+    from app.services.extraction_worker import run_job
+    with SessionLocal() as session:
+        job = session.get(ImportJob, unverified["job_id"])
+        job.state = ImportState.queued
+        session.commit()
+        result = run_job(session, job)
+        assert result.state == ImportState.failed
+        assert result.failure_stage == "rights_check"
+        assert session.query(SourcePage).count() == 0
 
     authorized_path = tmp_path / "authorized.pdf"
     make_pdf(authorized_path, "authorized fixture")
@@ -203,3 +214,34 @@ def test_owner_can_delete_private_source_and_document_records(client, tmp_path):
             SourceSpan, Transcript, Vocabulary, WordSense,
         ):
             assert session.query(model).count() == 0
+
+
+def test_knowledge_reads_are_scoped_to_authenticated_owner(client):
+    from app.database import SessionLocal
+    from app.models import Lesson, Textbook
+
+    with SessionLocal() as session:
+        textbook = Textbook(
+            owner_id="different-owner",
+            title="Private to another owner",
+            level="beginner",
+            volume_number=6,
+        )
+        session.add(textbook)
+        session.flush()
+        lesson = Lesson(
+            textbook_id=textbook.id,
+            ordinal=1,
+            title="Private lesson",
+            start_pdf_page=1,
+            end_pdf_page=1,
+            segmentation_method="fixture",
+        )
+        session.add(lesson)
+        session.commit()
+        textbook_id = textbook.id
+        lesson_id = lesson.id
+
+    assert all(item["id"] != textbook_id for item in client.get("/api/v1/textbooks").json())
+    assert client.get(f"/api/v1/textbooks/{textbook_id}/lessons").status_code == 404
+    assert client.get(f"/api/v1/lessons/{lesson_id}").status_code == 404
