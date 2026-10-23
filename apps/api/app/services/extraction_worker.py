@@ -55,13 +55,15 @@ def _fail(session: Session, job_id: int, stage: str, message: str, error: Except
     job = session.get(ImportJob, job_id)
     if job is None:
         raise RuntimeError("Import job disappeared while recording failure") from error
+    sqlstate = getattr(getattr(error, "orig", None), "sqlstate", None)
+    diagnostic = f"{type(error).__name__}, SQLSTATE {sqlstate}" if sqlstate else type(error).__name__
     job.state = ImportState.failed
     job.stage = "failed"
     job.failure_stage = stage
-    job.message = message
+    job.message = f"{message} ({diagnostic})"
     session.commit()
     session.refresh(job)
-    logger.error("Import job %s failed at stage %s (%s)", job_id, stage, type(error).__name__)
+    logger.error("Import job %s failed at stage %s (%s)", job_id, stage, diagnostic)
     return job
 
 

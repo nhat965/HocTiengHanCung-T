@@ -104,7 +104,7 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
         failed = run_next_job(session)
         assert failed is not None
         assert failed.state == ImportState.failed
-        assert failed.failure_stage == "structured_persistence"
+        assert failed.failure_stage == "structured_persistence", failed.message
         assert failed.stage == "failed"
         assert failed.attempts == 1
         assert session.scalar(select(func.count(SourcePage.id)).where(

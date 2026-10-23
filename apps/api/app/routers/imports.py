@@ -311,6 +311,7 @@ def delete_document(
         session.execute(delete(SourceBlock).where(SourceBlock.source_page_id.in_(page_ids)))
         session.execute(delete(SourcePage).where(SourcePage.id.in_(page_ids)))
         session.delete(document)
+        session.flush()
         session.execute(delete(Textbook).where(Textbook.id == textbook_id, Textbook.owner_id == owner_id))
         session.commit()
     except Exception as error:
