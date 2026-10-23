@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 from pathlib import Path
 
@@ -105,12 +106,22 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
 
     def capture_failure(session, job_id, stage, message, error):
         if stage == "raw_persistence":
+            original_error = getattr(error, "orig", error)
+            diagnostic = getattr(original_error, "diag", None)
             failure_diagnostics.update({
                 "error": type(error).__name__,
-                "cause": type(getattr(error, "orig", error)).__name__,
-                "sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None),
+                "cause": type(original_error).__name__,
+                "sqlstate": (
+                    getattr(original_error, "sqlstate", None)
+                    or getattr(original_error, "pgcode", None)
+                ),
+                "message_primary": getattr(diagnostic, "message_primary", None),
+                "table_name": getattr(diagnostic, "table_name", None),
+                "column_name": getattr(diagnostic, "column_name", None),
+                "datatype_name": getattr(diagnostic, "datatype_name", None),
                 "statement": getattr(error, "statement", None),
             })
+            print(f"Sanitized PostgreSQL failure metadata: {json.dumps(failure_diagnostics)}")
         return record_failure(session, job_id, stage, message, error)
 
     monkeypatch.setattr(extraction_worker, "_fail", capture_failure)
@@ -118,7 +129,7 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
         failed = run_next_job(session)
         assert failed is not None
         assert failed.state == ImportState.failed
-        assert failed.failure_stage == "structured_persistence", (failed.message, failure_diagnostics)
+        assert failed.failure_stage == "structured_persistence", failed.message
         assert failed.stage == "failed"
         assert failed.attempts == 1
         assert session.scalar(select(func.count(SourcePage.id)).where(
