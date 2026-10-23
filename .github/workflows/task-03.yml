@@ -1,10 +1,10 @@
-name: Task 03 private knowledge engine
+name: Korean knowledge data engine
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, codex/task-03-structured-knowledge]
   push:
-    branches: [codex/task-03-structured-knowledge]
+    branches: [codex/task-03-structured-knowledge, codex/task-04-data-engine]
   workflow_dispatch:
 
 permissions:

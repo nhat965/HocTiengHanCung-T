@@ -1,15 +1,15 @@
 import re
-import unicodedata
 
 from app.services.knowledge.layout import SourceBlock
 from app.services.knowledge.types import GrammarRecord, SentenceRecord, SourceRef
+from app.services.normalization import normalize_korean_key
 
 _GRAMMAR = re.compile(r"^\s*GRAMMAR\s*:\s*(?P<pattern>[^|]+?)(?:\s*\|\|\s*(?P<explanation>.*))?$", re.I)
 _EXAMPLE = re.compile(r"^\s*EXAMPLE\s*:\s*(?P<ko>[^|]+?)(?:\s*\|\|\s*(?P<vi>.*))?$", re.I)
 
 
 def normalize_pattern(text: str) -> str:
-    return unicodedata.normalize("NFKC", " ".join(text.split())).casefold()
+    return normalize_korean_key(text)
 
 
 def extract_grammar(blocks: list[SourceBlock]) -> tuple[list[GrammarRecord], list[SentenceRecord]]:

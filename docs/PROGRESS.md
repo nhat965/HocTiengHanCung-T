@@ -85,3 +85,24 @@
 - Full-book extraction, real textbook layout accuracy, human review, and accuracy metrics for any of the six books.
 - OCR fallback: Tesseract is unavailable in this environment.
 - AI, TTS, and STT provider integrations.
+
+## 2026-10-24 — Task 04 data-engine vertical slice
+
+- Audited PR #3, the raw/structured engines, migrations, worker, API, tests,
+  quality reports, and six local untracked PDF files. The source books were not
+  processed because reuse/processing rights have not been established.
+- Added conservative NFC source normalization, PostgreSQL-safe control cleanup,
+  stable track/source identifiers, and an extensible OCR contract whose safe
+  default records unresolved content without guessing text.
+- Separated sentence identity from source occurrence and added migration
+  `20261024_0005`; ingestion reuses owner-scoped identities and deletion removes
+  only identities that have become orphaned.
+- Added owner-scoped review decisions/history, dialogue retrieval, approved-by-
+  default JSON/JSONL/CSV dataset export, and document/lesson/type quality metrics.
+- Local validation: **24 API tests passed**; SQLite Alembic
+  upgrade → downgrade → upgrade passed. Both PostgreSQL 16 migration/test jobs,
+  dependency audits, and both frontend builds passed on PR #4.
+- The working dataset is a generated, authorized synthetic fixture: 1 lesson,
+  2 vocabulary entries, 1 grammar pattern, 1 sentence/identity, 1 passage,
+  2 exercise records, and 1 listening track with transcript. This is pipeline
+  evidence, not evidence that any textbook corpus is complete or accurate.

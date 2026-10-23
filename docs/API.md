@@ -24,6 +24,10 @@ route downloads source PDFs.
 | `GET` | `/lessons/{id}/sentences` | Return source-backed sentences. |
 | `GET` | `/lessons/{id}/reading` | Return reading passages. |
 | `GET` | `/lessons/{id}/listening` | Return track identifiers and transcript availability; no fabricated audio. |
+| `GET` | `/lessons/{id}/dialogues` | Return ordered dialogue turns and speakers. |
+| `GET` | `/review` | List owner-scoped records by review status with pagination. |
+| `POST` | `/review/{entity_type}/{entity_id}` | Record an owner-scoped approval, rejection, unresolved, or pending-review decision. |
+| `GET` | `/textbooks/{id}/exports/{dataset}` | Export an owner-scoped reviewed dataset as JSON, JSONL, or vocabulary CSV. |
 
 `POST /imports` request:
 
@@ -58,6 +62,13 @@ does not overwrite records whose review status is `approved` or `reviewed`.
 List endpoints for vocabulary, grammar, exercises, sentences, reading, and
 listening accept `offset`, `limit` (1–100), and `review_status` query
 parameters. `GET /health` is the only unauthenticated endpoint.
+
+Export datasets are `vocabulary`, `grammar`, `sentences`, `dialogues`,
+`reading`, `exercises`, and `listening`. The default filter is `approved`;
+callers must explicitly request another review status. JSON exports include a
+metadata envelope, JSONL starts with a metadata line, and vocabulary CSV repeats
+schema/source/extraction/export metadata on every data row. Cross-owner access
+returns 404.
 
 The standalone structured JSON CLI is an offline inspection/export tool. The
 rights-aware API worker is the integrated database persistence workflow.

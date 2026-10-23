@@ -1,15 +1,15 @@
 import re
-import unicodedata
 
 from app.services.knowledge.layout import SourceTable
 from app.services.knowledge.types import SourceRef, VocabularyRecord
+from app.services.normalization import normalize_korean_key
 
 _KOREAN = re.compile(r"[\uac00-\ud7a3]")
 _LATIN = re.compile(r"[A-Za-zÀ-ỹ]")
 
 
 def normalize_headword(text: str) -> str:
-    return unicodedata.normalize("NFKC", " ".join(text.split())).casefold()
+    return normalize_korean_key(text)
 
 
 def extract_vocabulary(tables: list[SourceTable]) -> list[VocabularyRecord]:

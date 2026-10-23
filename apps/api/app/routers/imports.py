@@ -22,6 +22,7 @@ from app.models import (
     LessonSection,
     Passage,
     Sentence,
+    SentenceIdentity,
     SourceBlock,
     SourceDocument,
     SourcePage,
@@ -261,6 +262,9 @@ def delete_document(
         vocabulary_ids = list(session.scalars(select(Vocabulary.id).where(Vocabulary.lesson_id.in_(lesson_ids))))
         grammar_ids = list(session.scalars(select(GrammarPattern.id).where(GrammarPattern.lesson_id.in_(lesson_ids))))
         sentence_ids = list(session.scalars(select(Sentence.id).where(Sentence.lesson_id.in_(lesson_ids))))
+        sentence_identity_ids = list(session.scalars(select(Sentence.identity_id).where(
+            Sentence.id.in_(sentence_ids), Sentence.identity_id.is_not(None),
+        )))
         passage_ids = list(session.scalars(select(Passage.id).where(Passage.lesson_id.in_(lesson_ids))))
         dialogue_ids = list(session.scalars(select(Dialogue.id).where(Dialogue.lesson_id.in_(lesson_ids))))
         exercise_ids = list(session.scalars(select(Exercise.id).where(Exercise.lesson_id.in_(lesson_ids))))
@@ -294,6 +298,9 @@ def delete_document(
                 | sentence_grammar_patterns.c.grammar_pattern_id.in_(grammar_ids or [-1])
             ))
         purge_entities(Sentence, "sentence", sentence_ids)
+        for identity_id in set(sentence_identity_ids):
+            if session.scalar(select(Sentence.id).where(Sentence.identity_id == identity_id)) is None:
+                session.execute(delete(SentenceIdentity).where(SentenceIdentity.id == identity_id))
         purge_entities(GrammarPattern, "grammar", grammar_ids)
         purge_entities(WordSense, "word_sense", sense_ids)
         purge_entities(LessonSection, "lesson_section", section_ids)

@@ -208,9 +208,21 @@ class GrammarPattern(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
 
 
+class SentenceIdentity(Base):
+    __tablename__ = "sentence_identities"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "normalized_text_ko", name="uq_sentence_identity_owner_text"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), index=True)
+    canonical_text_ko: Mapped[str] = mapped_column(Text)
+    normalized_text_ko: Mapped[str] = mapped_column(Text)
+
+
 class Sentence(Base):
     __tablename__ = "sentences"
     id: Mapped[int] = mapped_column(primary_key=True)
+    identity_id: Mapped[int | None] = mapped_column(ForeignKey("sentence_identities.id"), nullable=True, index=True)
     lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
     text_ko: Mapped[str] = mapped_column(Text)
     text_vi: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -220,6 +232,7 @@ class Sentence(Base):
     version: Mapped[int] = mapped_column(Integer, default=1)
     vocabulary_items: Mapped[list["Vocabulary"]] = relationship(secondary=sentence_vocabulary)
     grammar_patterns: Mapped[list["GrammarPattern"]] = relationship(secondary=sentence_grammar_patterns)
+    identity: Mapped["SentenceIdentity | None"] = relationship()
 
 
 class Passage(Base):
