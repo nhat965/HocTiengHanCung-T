@@ -37,3 +37,30 @@ class TextbookResponse(BaseModel):
     title: str
     level: str
     volume_number: int
+
+
+class LessonResponse(BaseModel):
+    id: int
+    ordinal: int | None
+    title: str
+    start_pdf_page: int | None
+    end_pdf_page: int | None
+    review_status: str
+
+
+class VocabularyResponse(BaseModel):
+    id: int
+    headword: str
+    review_status: str
+
+
+class GrammarResponse(BaseModel):
+    id: int
+    pattern: str
+    review_status: str
+
+
+class ExerciseResponse(BaseModel):
+    id: int
+    prompt: str
+    review_status: str

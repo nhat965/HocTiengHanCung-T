@@ -8,8 +8,10 @@ from app.database import Base
 
 
 class ImportState(str, Enum):
+    registered = "registered"
     queued = "queued"
     extracting = "extracting"
+    extracted = "extracted"
     needs_review = "needs_review"
     completed = "completed"
     failed = "failed"
@@ -40,6 +42,7 @@ class SourceDocument(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     textbook: Mapped[Textbook] = relationship(back_populates="source_documents")
     import_jobs: Mapped[list["ImportJob"]] = relationship(back_populates="source_document")
+    pages: Mapped[list["SourcePage"]] = relationship(back_populates="source_document", cascade="all, delete-orphan")
 
 
 class ImportJob(Base):
@@ -51,4 +54,182 @@ class ImportJob(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    max_attempts: Mapped[int] = mapped_column(Integer, default=3)
     source_document: Mapped[SourceDocument] = relationship(back_populates="import_jobs")
+
+
+class SourcePage(Base):
+    __tablename__ = "source_pages"
+    __table_args__ = (UniqueConstraint("source_document_id", "pdf_page_number", name="uq_source_pages_document_page"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    pdf_page_number: Mapped[int] = mapped_column(Integer)
+    printed_page_number: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    raw_text: Mapped[str] = mapped_column(Text, default="")
+    korean_character_count: Mapped[int] = mapped_column(Integer, default=0)
+    vietnamese_character_count: Mapped[int] = mapped_column(Integer, default=0)
+    image_count: Mapped[int] = mapped_column(Integer, default=0)
+    needs_ocr: Mapped[bool] = mapped_column(default=False)
+    extraction_method: Mapped[str] = mapped_column(String(32), default="pymupdf")
+    source_document: Mapped[SourceDocument] = relationship(back_populates="pages")
+    blocks: Mapped[list["SourceBlock"]] = relationship(back_populates="source_page", cascade="all, delete-orphan")
+
+
+class SourceBlock(Base):
+    __tablename__ = "source_blocks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_page_id: Mapped[int] = mapped_column(ForeignKey("source_pages.id"), index=True)
+    block_index: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text, default="")
+    x0: Mapped[float] = mapped_column()
+    y0: Mapped[float] = mapped_column()
+    x1: Mapped[float] = mapped_column()
+    y1: Mapped[float] = mapped_column()
+    is_header_footer_candidate: Mapped[bool] = mapped_column(default=False)
+    source_page: Mapped[SourcePage] = relationship(back_populates="blocks")
+
+
+class SourceSpan(Base):
+    __tablename__ = "source_spans"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_page_id: Mapped[int] = mapped_column(ForeignKey("source_pages.id"), index=True)
+    source_block_id: Mapped[int | None] = mapped_column(ForeignKey("source_blocks.id"), nullable=True)
+    label: Mapped[str] = mapped_column(String(64))
+    raw_text: Mapped[str] = mapped_column(Text)
+    normalized_text: Mapped[str] = mapped_column(Text)
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    review_status: Mapped[str] = mapped_column(String(32), default="pending")
+
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    textbook_id: Mapped[int] = mapped_column(ForeignKey("textbooks.id"), index=True)
+    ordinal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    title: Mapped[str] = mapped_column(String(255))
+    start_pdf_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    end_pdf_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    segmentation_method: Mapped[str] = mapped_column(String(64))
+    review_status: Mapped[str] = mapped_column(String(32), default="pending")
+
+
+class Vocabulary(Base):
+    __tablename__ = "vocabulary"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    headword: Mapped[str] = mapped_column(String(255), index=True)
+    normalized_headword: Mapped[str] = mapped_column(String(255), index=True)
+    extraction_method: Mapped[str] = mapped_column(String(64))
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    review_status: Mapped[str] = mapped_column(String(32), default="pending")
+
+
+class WordSense(Base):
+    __tablename__ = "word_senses"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vocabulary_id: Mapped[int] = mapped_column(ForeignKey("vocabulary.id"), index=True)
+    meaning_vi: Mapped[str] = mapped_column(Text)
+
+
+class GrammarPattern(Base):
+    __tablename__ = "grammar_patterns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    pattern: Mapped[str] = mapped_column(String(255))
+    normalized_pattern: Mapped[str] = mapped_column(String(255))
+    extraction_method: Mapped[str] = mapped_column(String(64))
+    confidence: Mapped[float] = mapped_column(default=0.0)
+    review_status: Mapped[str] = mapped_column(String(32), default="pending")
+
+
+class Sentence(Base):
+    __tablename__ = "sentences"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    text_ko: Mapped[str] = mapped_column(Text)
+    text_vi: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
+
+
+class Passage(Base):
+    __tablename__ = "passages"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    text: Mapped[str] = mapped_column(Text)
+
+
+class Dialogue(Base):
+    __tablename__ = "dialogues"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
+
+
+class DialogueTurn(Base):
+    __tablename__ = "dialogue_turns"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    dialogue_id: Mapped[int] = mapped_column(ForeignKey("dialogues.id"), index=True)
+    turn_index: Mapped[int] = mapped_column(Integer)
+    speaker: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    text: Mapped[str] = mapped_column(Text)
+
+
+class Exercise(Base):
+    __tablename__ = "exercises"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
+    review_status: Mapped[str] = mapped_column(String(32), default="pending")
+
+
+class ExerciseOption(Base):
+    __tablename__ = "exercise_options"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exercise_id: Mapped[int] = mapped_column(ForeignKey("exercises.id"), index=True)
+    option_index: Mapped[int] = mapped_column(Integer)
+    text: Mapped[str] = mapped_column(Text)
+
+
+class ListeningTrack(Base):
+    __tablename__ = "listening_tracks"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    lesson_id: Mapped[int | None] = mapped_column(ForeignKey("lessons.id"), nullable=True, index=True)
+    source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
+    asset_reference: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class Transcript(Base):
+    __tablename__ = "transcripts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    listening_track_id: Mapped[int] = mapped_column(ForeignKey("listening_tracks.id"), index=True)
+    text: Mapped[str] = mapped_column(Text)
+
+
+class AnswerKey(Base):
+    __tablename__ = "answer_keys"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exercise_id: Mapped[int] = mapped_column(ForeignKey("exercises.id"), index=True)
+    answer_text: Mapped[str] = mapped_column(Text)
+    source_span_id: Mapped[int] = mapped_column(ForeignKey("source_spans.id"))
+
+
+class ContentReview(Base):
+    __tablename__ = "content_reviews"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(64))
+    entity_id: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ContentProvenance(Base):
+    __tablename__ = "content_provenance"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    entity_type: Mapped[str] = mapped_column(String(64))
+    entity_id: Mapped[int] = mapped_column(Integer)
+    source_span_id: Mapped[int] = mapped_column(ForeignKey("source_spans.id"), index=True)
+    extraction_method: Mapped[str] = mapped_column(String(64))
