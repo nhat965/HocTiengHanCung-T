@@ -1,0 +1,12 @@
+{
+  "name": "korean-learning-platform",
+  "private": true,
+  "workspaces": ["apps/web"],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "test:web": "npm --workspace apps/web run test",
+    "dev:api": "cd apps/api && python -m uvicorn app.main:app --reload",
+    "test:api": "cd apps/api && python -m pytest tests"
+  }
+}
