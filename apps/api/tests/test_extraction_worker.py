@@ -100,11 +100,25 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
         raise RuntimeError("synthetic transaction failure")
 
     monkeypatch.setattr(extraction_worker, "persist_bundle", fail_after_structured_flush)
+    failure_diagnostics = {}
+    record_failure = extraction_worker._fail
+
+    def capture_failure(session, job_id, stage, message, error):
+        if stage == "raw_persistence":
+            failure_diagnostics.update({
+                "error": type(error).__name__,
+                "cause": type(getattr(error, "orig", error)).__name__,
+                "sqlstate": getattr(getattr(error, "orig", None), "sqlstate", None),
+                "statement": getattr(error, "statement", None),
+            })
+        return record_failure(session, job_id, stage, message, error)
+
+    monkeypatch.setattr(extraction_worker, "_fail", capture_failure)
     with database.SessionLocal() as session:
         failed = run_next_job(session)
         assert failed is not None
         assert failed.state == ImportState.failed
-        assert failed.failure_stage == "structured_persistence", failed.message
+        assert failed.failure_stage == "structured_persistence", (failed.message, failure_diagnostics)
         assert failed.stage == "failed"
         assert failed.attempts == 1
         assert session.scalar(select(func.count(SourcePage.id)).where(
