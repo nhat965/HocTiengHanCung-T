@@ -22,7 +22,8 @@ textbook data is included.
 | Stale-job recovery | Passed |
 | Alembic SQLite upgrade → downgrade base → upgrade head | Passed |
 | `git diff --check` | Passed |
-| Frontend production build | Passed in the prior validation run; no frontend files changed for Task 03.1 |
+| Frontend production build (Next.js 16.4.3, Turbopack) | Passed |
+| Production dependency audit | Passed; 0 vulnerabilities reported |
 
 Docker is not available in the local Windows environment, so a local
 PostgreSQL service could not be started.
@@ -33,8 +34,11 @@ The PR workflow configures PostgreSQL 16 and runs Alembic upgrade/downgrade/
 upgrade, the API test suite against the migrated PostgreSQL database,
 dependency audits, and the frontend production build. It must run successfully
 on the pushed PR branch before PostgreSQL or CI acceptance can be claimed.
-**At report authoring time the workflow has not yet been run; PostgreSQL
-validation is pending.**
+The initial run detected a vulnerable transitive PostCSS dependency under the
+existing Next.js version. Next.js was upgraded to 16.4.3; the production audit
+now reports zero vulnerabilities, and the local production build passes.
+**The workflow rerun for that fix is pending; PostgreSQL validation is not yet
+claimed.**
 
 ## Known unverified behavior
 
@@ -49,3 +53,5 @@ validation is pending.**
 - PostgreSQL legacy-data compatibility, including unique-index migration in a
   populated database with duplicate records, still needs practical
   verification.
+- No frontend unit tests are currently present; `npm run test:web` exits with
+  "No test files found".
