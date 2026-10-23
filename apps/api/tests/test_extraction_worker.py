@@ -37,6 +37,7 @@ def test_reimport_is_idempotent_and_preserves_reviewed_records(client, tmp_path:
             sha256=digest,
             page_count=1,
             source_path=str(pdf_path),
+            rights_status="authorized",
         )
         session.add(source)
         session.flush()
@@ -90,6 +91,7 @@ def test_reimport_is_idempotent_and_preserves_reviewed_records(client, tmp_path:
         assert session.get(Lesson, existing_lesson.id).review_status == "approved"
         assert session.get(SourceSpan, reviewed_span.id).review_status == "approved"
         assert session.get(SourceSpan, reviewed_span.id).confidence == 0.6
+        assert session.get(SourceSpan, reviewed_span.id).raw_text == "old extraction"
 
         result.state = ImportState.queued
         session.commit()

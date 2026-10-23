@@ -33,6 +33,11 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
         job.message = "Source document no longer exists."
         session.commit()
         return job
+    if document.rights_status != "authorized":
+        job.state = ImportState.failed
+        job.message = "Document rights must be marked authorized before extraction."
+        session.commit()
+        return job
     document_path = Path(document.source_path)
     document_id = document.id
     textbook_id = document.textbook_id
@@ -121,9 +126,31 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
                                 confidence=0.0,
                                 review_status="pending",
                             ))
-                        else:
+                        elif source_span.review_status not in {"approved", "reviewed"}:
                             source_span.raw_text = block.text
                             source_span.normalized_text = normalize_text(block.text)
+                for table in raw_page.tables:
+                    for row_index, row in enumerate(table.rows):
+                        raw_row = " | ".join(cell or "" for cell in row).strip()
+                        if not raw_row:
+                            continue
+                        label = f"raw_table:{table.index}:{row_index}"
+                        source_span = session.scalar(select(SourceSpan).where(
+                            SourceSpan.source_page_id == page.id,
+                            SourceSpan.label == label,
+                        ))
+                        if source_span is None:
+                            session.add(SourceSpan(
+                                source_page_id=page.id,
+                                label=label,
+                                raw_text=raw_row,
+                                normalized_text=normalize_text(raw_row),
+                                confidence=0.0,
+                                review_status="pending",
+                            ))
+                        elif source_span.review_status not in {"approved", "reviewed"}:
+                            source_span.raw_text = raw_row
+                            source_span.normalized_text = normalize_text(raw_row)
 
             existing_lessons = {
                 (lesson.ordinal, lesson.start_pdf_page)
