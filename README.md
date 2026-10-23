@@ -4,7 +4,16 @@ An evidence-first Korean learning platform for Vietnamese learners. It will impo
 
 ## Current status
 
-Phase 1 foundation is being established. The repository deliberately contains no copied textbook PDFs or invented lesson data. See [the implementation plan](docs/IMPLEMENTATION_PLAN.md) and [progress](docs/PROGRESS.md).
+The API and raw PDF extraction foundation are implemented. Six source PDFs are
+present locally under `docs/` as untracked files; they have not been pushed to
+GitHub. A bounded raw pilot was run for volume 4, lesson 01. Structured
+vocabulary, grammar, exercises, transcript/answer matching, OCR, and full-book
+extraction are not complete. See the [source audit](docs/reports/SOURCE_PDF_AUDIT.md),
+[pilot results](docs/reports/EXTRACTION_RESULTS.md), [implementation plan](docs/IMPLEMENTATION_PLAN.md),
+and [progress](docs/PROGRESS.md).
+
+Extracted textbook text and images are kept under the Git-ignored `data/`
+directory; do not commit these outputs without confirming distribution rights.
 
 ## Structure
 
@@ -24,6 +33,13 @@ Phase 1 foundation is being established. The repository deliberately contains no
 7. Run the web application in another terminal: `npm run dev:web`.
 
 The import endpoint only permits PDFs beneath `PDF_IMPORT_ROOT`. Configure this to a dedicated local import directory; do not point it at a broad drive root in production. To extract, queue the registration using `POST /api/v1/imports/{id}/queue` and run `python -m app.worker --once` from `apps/api`.
+
+To export a bounded page range as directly inspectable JSON and image files:
+
+```powershell
+cd apps/api
+python -m app.extract_pdf "D:\approved-imports\volume-4.pdf" --pages 18 35 --output "..\..\data\extracted\book-4\lesson-01-raw.json"
+```
 
 ### Importing the supplied textbooks
 
