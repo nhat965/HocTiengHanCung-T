@@ -1,14 +1,18 @@
 """Database-backed extraction worker. Run separately from document registration."""
 from __future__ import annotations
 
-from datetime import datetime
+import logging
+from pathlib import Path
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import ImportJob, ImportState, Lesson, SourceBlock, SourceDocument, SourcePage, SourceSpan
 from app.services.pdf_engine import PdfValidationError, extract_pages
+from app.services.pdf_importer import sha256_file
 from app.services.segmentation import DEFAULT_PROFILE, detect_lesson_boundaries, normalize_text
+
+logger = logging.getLogger(__name__)
 
 
 def queue_job(session: Session, job: ImportJob) -> ImportJob:
@@ -29,47 +33,135 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
         job.message = "Source document no longer exists."
         session.commit()
         return job
+    document_path = Path(document.source_path)
+    document_id = document.id
+    textbook_id = document.textbook_id
+    document_sha256 = document.sha256
     job.state = ImportState.extracting
     job.attempts += 1
     job.message = "Extracting page-level raw content."
     session.commit()
     try:
-        pages = extract_pages(document.source_path)
-        session.execute(delete(SourcePage).where(SourcePage.source_document_id == document.id))
-        session.flush()
+        if sha256_file(document_path) != document_sha256:
+            raise PdfValidationError("Source PDF changed after registration; register it again to extract the new bytes")
+        pages = extract_pages(document_path)
         page_text: dict[int, str] = {}
-        for raw_page in pages:
-            page = SourcePage(
-                source_document_id=document.id,
-                pdf_page_number=raw_page.pdf_page_number,
-                printed_page_number=raw_page.printed_page_number,
-                raw_text=raw_page.text,
-                korean_character_count=raw_page.korean_character_count,
-                vietnamese_character_count=raw_page.vietnamese_character_count,
-                image_count=raw_page.image_count,
-                needs_ocr=raw_page.needs_ocr,
-            )
-            session.add(page)
-            session.flush()
-            page_text[raw_page.pdf_page_number] = raw_page.text
-            for block in raw_page.blocks:
-                persisted = SourceBlock(source_page_id=page.id, block_index=block.index, text=block.text, x0=block.x0, y0=block.y0, x1=block.x1, y1=block.y1, is_header_footer_candidate=block.is_header_footer_candidate)
-                session.add(persisted)
-                session.flush()
-                if block.text:
-                    session.add(SourceSpan(source_page_id=page.id, source_block_id=persisted.id, label="raw_block", raw_text=block.text, normalized_text=normalize_text(block.text), confidence=1.0, review_status="not_required"))
-        textbook_id = document.textbook_id
-        session.execute(delete(Lesson).where(Lesson.textbook_id == textbook_id))
-        for boundary in detect_lesson_boundaries(page_text, DEFAULT_PROFILE):
-            session.add(Lesson(textbook_id=textbook_id, ordinal=boundary.ordinal, title=boundary.title, start_pdf_page=boundary.pdf_page_number, segmentation_method=DEFAULT_PROFILE.name, review_status="pending"))
-        job.state = ImportState.extracted
-        job.message = "Raw pages and provisional lesson boundaries extracted. Structured records await review/extractors."
+        with session.begin():
+            existing_pages = {
+                page.pdf_page_number: page
+                for page in session.scalars(
+                    select(SourcePage).where(SourcePage.source_document_id == document_id)
+                ).all()
+            }
+            for raw_page in pages:
+                page = existing_pages.get(raw_page.pdf_page_number)
+                if page is None:
+                    page = SourcePage(
+                        source_document_id=document_id,
+                        pdf_page_number=raw_page.pdf_page_number,
+                        raw_text=raw_page.text,
+                        korean_character_count=raw_page.korean_character_count,
+                        vietnamese_character_count=raw_page.vietnamese_character_count,
+                        image_count=raw_page.image_count,
+                        needs_ocr=raw_page.needs_ocr,
+                    )
+                    session.add(page)
+                    session.flush()
+                else:
+                    page.printed_page_number = raw_page.printed_page_number
+                    page.raw_text = raw_page.text
+                    page.korean_character_count = raw_page.korean_character_count
+                    page.vietnamese_character_count = raw_page.vietnamese_character_count
+                    page.image_count = raw_page.image_count
+                    page.needs_ocr = raw_page.needs_ocr
+                page_text[raw_page.pdf_page_number] = raw_page.text
+
+                existing_blocks = {
+                    block.block_index: block
+                    for block in session.scalars(
+                        select(SourceBlock).where(SourceBlock.source_page_id == page.id)
+                    ).all()
+                }
+                for block in raw_page.blocks:
+                    persisted = existing_blocks.get(block.index)
+                    if persisted is None:
+                        persisted = SourceBlock(
+                            source_page_id=page.id,
+                            block_index=block.index,
+                            text=block.text,
+                            x0=block.x0,
+                            y0=block.y0,
+                            x1=block.x1,
+                            y1=block.y1,
+                            is_header_footer_candidate=block.is_header_footer_candidate,
+                        )
+                        session.add(persisted)
+                        session.flush()
+                    else:
+                        persisted.text = block.text
+                        persisted.x0 = block.x0
+                        persisted.y0 = block.y0
+                        persisted.x1 = block.x1
+                        persisted.y1 = block.y1
+                        persisted.is_header_footer_candidate = block.is_header_footer_candidate
+                    if block.text:
+                        source_span = session.scalar(
+                            select(SourceSpan).where(
+                                SourceSpan.source_block_id == persisted.id,
+                                SourceSpan.label == "raw_block",
+                            )
+                        )
+                        if source_span is None:
+                            session.add(SourceSpan(
+                                source_page_id=page.id,
+                                source_block_id=persisted.id,
+                                label="raw_block",
+                                raw_text=block.text,
+                                normalized_text=normalize_text(block.text),
+                                confidence=0.0,
+                                review_status="pending",
+                            ))
+                        else:
+                            source_span.raw_text = block.text
+                            source_span.normalized_text = normalize_text(block.text)
+
+            existing_lessons = {
+                (lesson.ordinal, lesson.start_pdf_page)
+                for lesson in session.scalars(
+                    select(Lesson).where(Lesson.textbook_id == textbook_id)
+                ).all()
+            }
+            for boundary in detect_lesson_boundaries(page_text, DEFAULT_PROFILE):
+                key = (boundary.ordinal, boundary.pdf_page_number)
+                if key not in existing_lessons:
+                    session.add(Lesson(
+                        textbook_id=textbook_id,
+                        ordinal=boundary.ordinal,
+                        title=boundary.title,
+                        start_pdf_page=boundary.pdf_page_number,
+                        segmentation_method=DEFAULT_PROFILE.name,
+                        review_status="pending",
+                    ))
+                    existing_lessons.add(key)
+            job.state = ImportState.extracted
+            job.message = "Raw pages and provisional lesson boundaries extracted. Structured records await review/extractors."
     except (PdfValidationError, RuntimeError, OSError) as error:
+        session.rollback()
+        job = session.get(ImportJob, job.id)
         job.state = ImportState.failed
         job.message = str(error)
-    finally:
         session.commit()
         session.refresh(job)
+        return job
+    except Exception:
+        session.rollback()
+        job = session.get(ImportJob, job.id)
+        job.state = ImportState.failed
+        job.message = "Unexpected extraction failure; see worker logs."
+        session.commit()
+        logger.exception("Unexpected PDF extraction failure for job %s", job.id)
+        raise
+    session.refresh(job)
     return job
 
 

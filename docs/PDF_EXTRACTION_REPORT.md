@@ -11,11 +11,20 @@ The user-provided *Tiếng Hàn Tổng Hợp Trung Cấp 4* PDF was inspected wi
 
 ## Pilot status
 
-**Not executed.** The extraction engine was tested with a synthetic PDF fixture; the textbook pilot has not been run. No textbook lesson content has been persisted or claimed as extracted, and this report intentionally includes no vocabulary, grammar, dialogue, transcript, or answer keys copied from the source.
+**A bounded raw pilot was executed** on volume 4, lesson 01: PDF pages 18–35,
+corresponding to printed pages 17–34. It yielded 18 pages, 419 text blocks,
+3,735 spans, 14 detected table candidates, and 54 extracted images. No
+structured knowledge records were persisted or claimed as extracted.
 
 ## Task 01A implementation
 
 The extractor emits per-page raw text, block and span coordinates, font attributes, page dimensions and rotation, detected table rows, extracted image assets and their placement metadata. The JSON also records PDF metadata, file size, page count, and SHA-256. OCR remains an indicator only; this tool does not claim to perform OCR.
+
+The local pilot output is `data/extracted/book-4/lesson-01-raw.json` with an
+adjacent image-assets directory. It is ignored by Git because it contains
+source textbook content. The six-source audit is documented in
+[`reports/SOURCE_PDF_AUDIT.md`](./reports/SOURCE_PDF_AUDIT.md), and measured
+pilot counts are in [`reports/EXTRACTION_RESULTS.md`](./reports/EXTRACTION_RESULTS.md).
 
 Run from `apps/api`:
 
@@ -31,7 +40,8 @@ The command writes image files into a sibling `source_assets` directory. API tes
 
 ## Remaining work
 
-- Run and manually inspect a rights-cleared textbook pilot, then record extraction coverage and errors.
+- Visually inspect and correct the pilot's reading order, table alignment, and section boundaries against the PDF.
+- Add region-level OCR review flags and configure an OCR provider with Korean and Vietnamese language support.
 - Add structured lesson-content extraction and source relationships in Task 01B.
 - Add transcript/answer-key matching, missing-data checks, and review tooling in Task 01C.
 - Verify PostgreSQL migrations and worker operation against a live database.

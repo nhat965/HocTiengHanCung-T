@@ -2,9 +2,9 @@
 
 ## Repository assessment — 2026-10-23
 
-The GitHub remote `nhat965/HocTiengHanCung-T` and its attached local checkout were empty at assessment time. There was no existing application, dependency manifest, database schema, PDF copy, or prior implementation to preserve.
+At initial assessment the remote `nhat965/HocTiengHanCung-T` had one scaffold commit and no PDF files. The current workspace contains six user-provided PDFs under `docs/`, but Git reports them as untracked; their presence on GitHub is not verified and they are not included in commits.
 
-Six source PDFs are available outside the repository at user-provided `D:\` paths. Their sizes range from approximately 19 MB to 120 MB. Phase 1 records and supports their import without copying copyrighted source files into Git or fabricating content from them. Text/OCR quality must be measured during an actual import.
+The six local PDFs have been audited for file size, SHA-256, metadata, page count, text availability, language character counts, images, and candidate tables. The measured audit is in `docs/reports/SOURCE_PDF_AUDIT.md`. Text extraction has only been run on a bounded volume-4 lesson-01 range; the source files and extracted textbook content remain uncommitted.
 
 ## Chosen architecture
 
@@ -31,9 +31,13 @@ Six source PDFs are available outside the repository at user-provided `D:\` path
 
 ### Phase 2 — Textbook engine
 
-Build PyMuPDF/OCR extraction, table-of-contents/lesson segmentation, review queue, sourced vocabulary and grammar persistence, and administrator import review. Add fixtures using rights-cleared PDFs only.
+1. Complete durable raw database persistence for spans, tables, images, and page metadata.
+2. Improve layout-aware segmentation and identify real lesson starts independently of table-of-contents entries.
+3. Add OCR provider support or keep affected regions explicitly flagged for human review.
+4. Build sourced vocabulary, grammar, sentence, dialogue, reading, exercise, transcript, and answer-key extractors.
+5. Add quality metrics and review tools; do not assign high confidence solely because PDF text is extractable.
 
-Task 01 adds the raw page/block/span layer, an explicit extraction queue/worker, preliminary profile-driven segmentation, knowledge-base schema, and quality-report foundation. The structured extractors and the volume-4 pilot remain blocked on a runnable Python environment and must not be represented as complete.
+**Current measured progress:** raw JSON and image export works on a synthetic fixture and a bounded real volume-4 lesson-01 range. The source audit covers all six local PDFs. No structured book data has been extracted, no OCR has run, and a full-book import has not been verified. See `docs/reports/EXTRACTION_RESULTS.md`.
 
 ### Phase 3 — Learning engine
 
@@ -61,6 +65,9 @@ The first migration establishes `textbooks`, `source_documents`, `import_jobs`, 
 
 ## Risks and decisions deferred
 
-- PDF extraction quality, OCR language packs, and exact lesson boundaries cannot be certified until the importer is run on the supplied PDFs.
+- Tesseract is not installed; OCR language packs and OCR-based extraction are not available in this environment.
+- Table detection is structural and may mistake decorative lines or exercise layouts for data tables.
+- The current API worker does not yet persist every JSON raw artifact (table rows, span font/geometry, image assets).
+- Full-book and structured extraction accuracy has not been established; human review remains necessary.
 - The selected authentication provider, AI provider, TTS/STT provider, and deployment target remain configuration decisions.
 - The official TOPIK II blueprint is intentionally deferred until Phase 4 research.
