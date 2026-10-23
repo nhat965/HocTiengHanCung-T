@@ -109,10 +109,17 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
             original_error = getattr(error, "orig", error)
             diagnostic = getattr(original_error, "diag", None)
             parameters = getattr(error, "params", None)
+            driver_message = str(original_error)
+            if isinstance(parameters, dict):
+                for value in parameters.values():
+                    if isinstance(value, str) and value:
+                        driver_message = driver_message.replace(value, "[redacted]")
+                        driver_message = driver_message.replace(repr(value), "[redacted]")
             failure_diagnostics.update({
                 "error": type(error).__name__,
                 "cause": type(original_error).__name__,
                 "cause_module": type(original_error).__module__,
+                "driver_message": driver_message,
                 "sqlstate": (
                     getattr(original_error, "sqlstate", None)
                     or getattr(original_error, "pgcode", None)
