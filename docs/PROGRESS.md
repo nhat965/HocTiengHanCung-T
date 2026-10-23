@@ -100,8 +100,8 @@
 - Added owner-scoped review decisions/history, dialogue retrieval, approved-by-
   default JSON/JSONL/CSV dataset export, and document/lesson/type quality metrics.
 - Local validation: **24 API tests passed**; SQLite Alembic
-  upgrade → downgrade → upgrade passed. PostgreSQL 16 and the frontend build are
-  enforced by the PR workflow and remain pending until GitHub Actions completes.
+  upgrade → downgrade → upgrade passed. Both PostgreSQL 16 migration/test jobs,
+  dependency audits, and both frontend builds passed on PR #4.
 - The working dataset is a generated, authorized synthetic fixture: 1 lesson,
   2 vocabulary entries, 1 grammar pattern, 1 sentence/identity, 1 passage,
   2 exercise records, and 1 listening track with transcript. This is pipeline

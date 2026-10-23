@@ -66,8 +66,8 @@ No record from the six private textbooks was approved or exported.
   authorization, review and exports are covered.
 - Alembic SQLite check: upgrade → downgrade → upgrade passed through revision
   `20261024_0005`.
-- PostgreSQL 16 migration/test result and final web build: pending GitHub Actions
-  for the final commit; the PR must not be merged unless both checks pass.
+- PostgreSQL 16 migration/tests, Python dependency audit, npm production audit,
+  and web production build all passed in both GitHub Actions runs for PR #4.
 
 ## Private output locations
 
