@@ -33,6 +33,8 @@ Six source PDFs are available outside the repository at user-provided `D:\` path
 
 Build PyMuPDF/OCR extraction, table-of-contents/lesson segmentation, review queue, sourced vocabulary and grammar persistence, and administrator import review. Add fixtures using rights-cleared PDFs only.
 
+Task 01 adds the raw page/block/span layer, an explicit extraction queue/worker, preliminary profile-driven segmentation, knowledge-base schema, and quality-report foundation. The structured extractors and the volume-4 pilot remain blocked on a runnable Python environment and must not be represented as complete.
+
 ### Phase 3 — Learning engine
 
 Build sourced lesson pages, deterministic exercises, progress, mistake history, and a testable spaced-repetition scheduler.

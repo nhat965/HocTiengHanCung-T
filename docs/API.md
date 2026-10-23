@@ -7,7 +7,14 @@ Base URL: `http://localhost:8000/api/v1`
 | `GET` | `/health` | Liveness and database availability check. |
 | `GET` | `/textbooks` | List imported textbook records. |
 | `POST` | `/imports` | Start an idempotent import from a server-visible PDF path. |
+| `POST` | `/imports/{id}/queue` | Queue a registered/retryable import for the worker. |
 | `GET` | `/imports/{id}` | Retrieve import-job state. |
+| `GET` | `/imports/{id}/report` | Return coverage/accuracy-separated extraction metrics. |
+| `GET` | `/textbooks/{id}/lessons` | Return source-derived lesson boundaries. |
+| `GET` | `/lessons/{id}` | Return one lesson. |
+| `GET` | `/lessons/{id}/vocabulary` | Return reviewed or pending source-backed vocabulary. |
+| `GET` | `/lessons/{id}/grammar` | Return reviewed or pending source-backed grammar. |
+| `GET` | `/lessons/{id}/exercises` | Return source-backed exercises. |
 
 `POST /imports` body:
 
@@ -20,4 +27,4 @@ Base URL: `http://localhost:8000/api/v1`
 }
 ```
 
-The response reports `already_imported: true` for byte-identical PDFs. The importer does not claim lesson extraction completed until its job state is `completed` and reviewed output exists.
+The response reports `already_imported: true` for byte-identical PDFs. New documents begin as `registered`; extraction begins only after `POST /imports/{id}/queue` and a separate worker run. `extracted` means raw source pages are present, not that human review has confirmed the content.

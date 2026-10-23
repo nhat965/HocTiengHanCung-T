@@ -1,6 +1,13 @@
+import pytest
+
+
 def test_import_is_idempotent_for_same_pdf_bytes(client, tmp_path):
+    fitz = pytest.importorskip("fitz")
     source = tmp_path / "lesson.pdf"
-    source.write_bytes(b"%PDF-1.4 test fixture")
+    document = fitz.open()
+    document.new_page()
+    document.save(source)
+    document.close()
     payload = {
         "source_path": str(source),
         "title": "Source fixture",
