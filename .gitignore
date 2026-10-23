@@ -12,3 +12,5 @@ data/
 private-data/
 imports/
 coverage/
+.tools/
+docs/*.pdf
