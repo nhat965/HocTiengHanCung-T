@@ -29,6 +29,7 @@ from app.services.extraction_worker import recover_stale_jobs, run_job, run_next
 def _korean_font() -> Path | None:
     candidates = [
         Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "malgun.ttf",
+        Path("/usr/share/fonts/truetype/unfonts-core/UnDotum.ttf"),
         Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
         Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
     ]
