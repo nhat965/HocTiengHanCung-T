@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -15,6 +16,8 @@ class ImportRequest(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     level: str = Field(min_length=1, max_length=64)
     volume_number: int = Field(ge=1, le=6)
+    rights_status: Literal["unverified", "authorized", "restricted"] = "unverified"
+    rights_note: str | None = Field(default=None, max_length=2000)
 
 
 class ImportResponse(BaseModel):
@@ -28,6 +31,11 @@ class ImportJobResponse(BaseModel):
     id: int
     source_document_id: int
     state: ImportState
+    stage: str
+    failure_stage: str | None = None
+    attempts: int
+    max_attempts: int
+    record_counts: dict[str, int] | None = None
     message: str | None
     created_at: datetime
 
@@ -51,16 +59,53 @@ class LessonResponse(BaseModel):
 class VocabularyResponse(BaseModel):
     id: int
     headword: str
+    meanings_vi: list[str] = Field(default_factory=list)
+    source_page_number: int | None = None
     review_status: str
 
 
 class GrammarResponse(BaseModel):
     id: int
     pattern: str
+    explanation_vi: str | None = None
+    source_page_number: int | None = None
     review_status: str
 
 
 class ExerciseResponse(BaseModel):
     id: int
     prompt: str
+    exercise_type: str
+    options: list[str] = Field(default_factory=list)
+    answer: str | None = None
+    source_page_number: int | None = None
     review_status: str
+
+
+class SentenceResponse(BaseModel):
+    id: int
+    text_ko: str
+    text_vi: str | None
+    source_page_number: int | None
+    review_status: str
+
+
+class PassageResponse(BaseModel):
+    id: int
+    title: str | None
+    text: str
+    source_page_number: int | None
+    review_status: str
+
+
+class ListeningResponse(BaseModel):
+    id: int
+    track_identifier: str
+    audio_status: str
+    transcript_available: bool
+    source_page_number: int | None
+    review_status: str
+
+
+class DeleteDocumentResponse(BaseModel):
+    deleted: bool
