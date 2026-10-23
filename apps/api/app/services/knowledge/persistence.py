@@ -53,10 +53,13 @@ def _source_span_id(
             SourceBlock.source_page_id == page_ids[0],
             SourceBlock.block_index == source.block_index,
         ))
-        exact = session.scalar(query.where(SourceSpan.source_block_id == block_id)) if block_id is not None else None
-        if exact is not None:
-            return exact
-    return session.scalar(query.order_by(SourceSpan.id).limit(1))
+        if block_id is None:
+            return None
+        return session.scalar(query.where(
+            SourceSpan.source_block_id == block_id,
+            SourceSpan.label == "raw_block",
+        ))
+    return None
 
 
 def _provenance(session: Session, kind: str, entity_id: int, span_id: int | None, method: str, version: str) -> None:
@@ -93,9 +96,18 @@ def persist_bundle(
         "listening_tracks": 0, "transcripts": 0, "answers": 0,
     }
     lesson_ids: dict[tuple[int, int], int] = {}
+    source_span_cache: dict[SourceRef, int | None] = {}
+
+    def resolve_source(source: SourceRef) -> int | None:
+        if source not in source_span_cache:
+            source_span_cache[source] = _source_span_id(
+                session, source, textbook_id, source_document_id,
+            )
+        return source_span_cache[source]
+
     with session.begin_nested():
         for item in bundle.lessons:
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if span_id is None:
                 continue
             row = session.scalar(select(Lesson).where(
@@ -138,7 +150,7 @@ def persist_bundle(
 
         for item in bundle.sections:
             lesson_id = lesson_for_page(item.source.pdf_page_number)
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if lesson_id is None or span_id is None:
                 continue
             row = session.scalar(select(LessonSection).where(
@@ -168,7 +180,7 @@ def persist_bundle(
                 Vocabulary.lesson_id == lesson_id,
                 Vocabulary.normalized_headword == item.normalized_headword,
             )) if lesson_id is not None else None
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if span_id is None:
                 continue
             if row is None:
@@ -218,7 +230,7 @@ def persist_bundle(
                 GrammarPattern.lesson_id == lesson_id,
                 GrammarPattern.normalized_pattern == item.normalized_pattern,
             )) if lesson_id is not None else None
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if span_id is None:
                 continue
             if row is None:
@@ -252,7 +264,7 @@ def persist_bundle(
                 Sentence.text_ko == item.text_ko,
                 Sentence.text_vi == item.text_vi,
             )) if lesson_id is not None else None
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if span_id is None:
                 continue
             if row is None:
@@ -282,7 +294,7 @@ def persist_bundle(
         dialogue_ids: dict[str, int] = {}
         for item in bundle.dialogue_turns:
             lesson_id = lesson_for_page(item.source.pdf_page_number)
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             dialogue = session.scalar(select(Dialogue).where(
                 Dialogue.lesson_id == lesson_id,
                 Dialogue.group_identifier == item.group_id,
@@ -317,7 +329,7 @@ def persist_bundle(
         passage_ids: dict[str, int] = {}
         for item in bundle.passages:
             lesson_id = lesson_for_page(item.source.pdf_page_number)
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if span_id is None:
                 continue
             text = "\n\n".join(item.paragraphs)
@@ -342,7 +354,7 @@ def persist_bundle(
         exercise_ids: dict[str, int] = {}
         for item in bundle.exercises:
             lesson_id = lesson_for_page(item.source.pdf_page_number)
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if span_id is None:
                 continue
             parent_id = exercise_ids.get(item.parent_id) if item.parent_id else None
@@ -376,7 +388,7 @@ def persist_bundle(
                 if existing is None:
                     session.add(ExerciseOption(
                         exercise_id=row.id, option_index=option.option_index,
-                        text=option.text, source_span_id=_source_span_id(session, option.source, textbook_id, source_document_id),
+                        text=option.text, source_span_id=resolve_source(option.source),
                     ))
                     session.flush()
                     option_id = session.scalar(select(ExerciseOption.id).where(
@@ -384,9 +396,9 @@ def persist_bundle(
                         ExerciseOption.option_index == option.option_index,
                     ))
                     counts["exercise_options"] += 1
-                    _provenance(session, "exercise_option", option_id, _source_span_id(session, option.source, textbook_id, source_document_id), option.extraction_method, option.extraction_version)
+                    _provenance(session, "exercise_option", option_id, resolve_source(option.source), option.extraction_method, option.extraction_version)
             if item.answer is not None and item.answer_source is not None:
-                answer_span = _source_span_id(session, item.answer_source, textbook_id, source_document_id)
+                answer_span = resolve_source(item.answer_source)
                 if answer_span is not None and session.scalar(select(AnswerKey.id).where(
                     AnswerKey.exercise_id == row.id,
                     AnswerKey.answer_text == item.answer,
@@ -408,7 +420,7 @@ def persist_bundle(
         track_ids: dict[str, int] = {}
         for item in bundle.listening_tracks:
             lesson_id = lesson_for_page(item.source.pdf_page_number)
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if span_id is None:
                 continue
             row = session.scalar(select(ListeningTrack).where(
@@ -430,7 +442,7 @@ def persist_bundle(
 
         for item in bundle.transcripts:
             track_id = track_ids.get(item.track_identifier)
-            span_id = _source_span_id(session, item.source, textbook_id, source_document_id)
+            span_id = resolve_source(item.source)
             if track_id is None or span_id is None:
                 continue
             if session.scalar(select(Transcript.id).where(
@@ -450,5 +462,18 @@ def persist_bundle(
                     Transcript.source_span_id == span_id,
                 ))
                 _provenance(session, "transcript", transcript_id, span_id, item.extraction_method, item.extraction_version)
+    unresolved_pages = sorted({
+        source.pdf_page_number
+        for source, span_id in source_span_cache.items()
+        if span_id is None
+    })
+    if unresolved_pages:
+        bundle.warnings.append(
+            "Source span unresolved; review required on page(s): "
+            + ", ".join(str(page) for page in unresolved_pages)
+        )
+    counts["unresolved_sources"] = sum(
+        span_id is None for span_id in source_span_cache.values()
+    )
     session.flush()
     return counts

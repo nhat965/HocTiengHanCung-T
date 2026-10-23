@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from app.text_sanitizer import sanitize_text
+
 
 class PdfValidationError(ValueError):
     """Raised when a source cannot be opened safely for extraction."""
@@ -79,6 +81,7 @@ class RawPage:
     korean_character_count: int
     vietnamese_character_count: int
     needs_ocr: bool
+    sanitized_nul_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -154,9 +157,13 @@ def extract_document(path: Path, pages: range | None = None) -> RawDocument:
             blocks: list[RawBlock] = []
             spans: list[RawSpan] = []
             images: list[RawImage] = []
+            sanitized_nul_count = 0
             for index, block in enumerate(page.get_text("blocks", sort=True)):
                 x0, y0, x1, y1, text, *_ = block
-                normalized = "\n".join(line.rstrip() for line in text.splitlines()).strip()
+                sanitized_nul_count += text.count("\x00")
+                normalized = sanitize_text(
+                    "\n".join(line.rstrip() for line in text.splitlines()).strip()
+                )
                 blocks.append(RawBlock(
                     index=index,
                     text=normalized,
@@ -187,6 +194,8 @@ def extract_document(path: Path, pages: range | None = None) -> RawDocument:
                 for line in block.get("lines", []):
                     for span in line.get("spans", []):
                         span_text = span["text"]
+                        sanitized_nul_count += span_text.count("\x00")
+                        span_text = sanitize_text(span_text)
                         x0, y0, x1, y1 = map(float, span["bbox"])
                         spans.append(RawSpan(
                             index=len(spans),
@@ -200,15 +209,23 @@ def extract_document(path: Path, pages: range | None = None) -> RawDocument:
             raw_text = "\n".join(item.text for item in blocks if item.text)
             korean_count = len(_KOREAN.findall(raw_text))
             vietnamese_count = len(_VIETNAMESE.findall(raw_text))
-            tables = [
-                RawTable(
+            tables: list[RawTable] = []
+            for index, table in enumerate(page.find_tables().tables):
+                rows = []
+                for row in table.extract():
+                    sanitized_row = []
+                    for cell in row:
+                        if cell is not None:
+                            sanitized_nul_count += cell.count("\x00")
+                            cell = sanitize_text(cell)
+                        sanitized_row.append(cell)
+                    rows.append(sanitized_row)
+                tables.append(RawTable(
                     index=index,
                     x0=float(table.bbox[0]), y0=float(table.bbox[1]),
                     x1=float(table.bbox[2]), y1=float(table.bbox[3]),
-                    rows=[[cell for cell in row] for row in table.extract()],
-                )
-                for index, table in enumerate(page.find_tables().tables)
-            ]
+                    rows=rows,
+                ))
             image_count = len(images)
             needs_ocr = len(raw_text.strip()) < 24 and image_count > 0
             extracted.append(RawPage(
@@ -226,6 +243,7 @@ def extract_document(path: Path, pages: range | None = None) -> RawDocument:
                 korean_character_count=korean_count,
                 vietnamese_character_count=vietnamese_count,
                 needs_ocr=needs_ocr,
+                sanitized_nul_count=sanitized_nul_count,
             ))
         return RawDocument(
             filename=path.name,

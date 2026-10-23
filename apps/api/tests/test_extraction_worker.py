@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 from pathlib import Path
 
@@ -46,6 +45,7 @@ def _write_structured_fixture(path: Path) -> None:
     page.insert_font(fontname="korean", fontfile=str(font_path))
     content = [
         ("01 유행", True),
+        ("Fixture NUL: before\x00after", False),
         ("GRAMMAR: -아/어 보다 || thử làm", True),
         ("EXAMPLE: 책을 읽어 봐요. || Tôi thử đọc sách.", True),
         ("READING[read1]: A short story", False),
@@ -74,6 +74,7 @@ def _write_structured_fixture(path: Path) -> None:
     page.insert_text((310, 622), "quả táo", fontsize=11)
     page.insert_text((60, 652), "가다", fontname="korean", fontsize=11)
     page.insert_text((310, 652), "đi", fontsize=11)
+    page.insert_text((310, 682), "NUL table cell: before\x00after", fontsize=9)
     pdf.save(path)
     pdf.close()
 
@@ -101,49 +102,11 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
         raise RuntimeError("synthetic transaction failure")
 
     monkeypatch.setattr(extraction_worker, "persist_bundle", fail_after_structured_flush)
-    failure_diagnostics = {}
-    record_failure = extraction_worker._fail
-
-    def capture_failure(session, job_id, stage, message, error):
-        if stage == "raw_persistence":
-            original_error = getattr(error, "orig", error)
-            diagnostic = getattr(original_error, "diag", None)
-            parameters = getattr(error, "params", None)
-            driver_message = str(original_error)
-            if isinstance(parameters, dict):
-                for value in parameters.values():
-                    if isinstance(value, str) and value:
-                        driver_message = driver_message.replace(value, "[redacted]")
-                        driver_message = driver_message.replace(repr(value), "[redacted]")
-            failure_diagnostics.update({
-                "error": type(error).__name__,
-                "cause": type(original_error).__name__,
-                "cause_module": type(original_error).__module__,
-                "driver_message": driver_message,
-                "sqlstate": (
-                    getattr(original_error, "sqlstate", None)
-                    or getattr(original_error, "pgcode", None)
-                ),
-                "message_primary": getattr(diagnostic, "message_primary", None),
-                "table_name": getattr(diagnostic, "table_name", None),
-                "column_name": getattr(diagnostic, "column_name", None),
-                "datatype_name": getattr(diagnostic, "datatype_name", None),
-                "parameter_types": (
-                    {key: type(value).__name__ for key, value in parameters.items()}
-                    if isinstance(parameters, dict)
-                    else None
-                ),
-                "statement": getattr(error, "statement", None),
-            })
-            print(f"Sanitized PostgreSQL failure metadata: {json.dumps(failure_diagnostics)}")
-        return record_failure(session, job_id, stage, message, error)
-
-    monkeypatch.setattr(extraction_worker, "_fail", capture_failure)
     with database.SessionLocal() as session:
         failed = run_next_job(session)
         assert failed is not None
         assert failed.state == ImportState.failed
-        assert failed.failure_stage == "structured_persistence", failed.message
+        assert failed.failure_stage == "structured_persistence"
         assert failed.stage == "failed"
         assert failed.attempts == 1
         assert session.scalar(select(func.count(SourcePage.id)).where(
@@ -165,6 +128,38 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
         assert completed.record_counts["passages"] == 1
         assert completed.record_counts["exercises"] == 2
         assert completed.record_counts["listening_tracks"] == 1
+        assert completed.quality_summary["text_sanitization"]["nul_replacements"] > 0
+        source_page = session.scalar(select(SourcePage).where(
+            SourcePage.source_document_id == document_id,
+        ))
+        assert source_page is not None
+        assert "\uFFFD" in source_page.raw_text
+        assert "\x00" not in source_page.raw_text
+        assert all("\x00" not in block.text for block in session.scalars(
+            select(SourceBlock).where(SourceBlock.source_page_id == source_page.id),
+        ))
+        source_spans = list(session.scalars(
+            select(SourceSpan).where(SourceSpan.source_page_id == source_page.id),
+        ))
+        assert all("\x00" not in span.raw_text for span in source_spans)
+        assert any(span.label.startswith("raw_table:") for span in source_spans)
+        assert any(
+            span.label.startswith("raw_table:") and "\uFFFD" in span.raw_text
+            for span in source_spans
+        )
+        textbook = session.get(Textbook, source_page.source_document.textbook_id)
+        assert textbook is not None
+        textbook.title = "Fixture\x00 title"
+        persisted_job = session.get(ImportJob, job_id)
+        assert persisted_job is not None
+        persisted_quality = dict(persisted_job.quality_summary)
+        persisted_quality["sanitizer_probe"] = {"value": "한국어\x00 tiếng Việt"}
+        persisted_job.quality_summary = persisted_quality
+        session.commit()
+        session.refresh(textbook)
+        session.refresh(persisted_job)
+        assert textbook.title == "Fixture\uFFFD title"
+        assert persisted_job.quality_summary["sanitizer_probe"]["value"] == "한국어\uFFFD tiếng Việt"
         grammar = session.scalar(select(GrammarPattern))
         assert grammar is not None
         grammar.pattern = "reviewed grammar"

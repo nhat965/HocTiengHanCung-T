@@ -69,6 +69,16 @@
 - CI dependency audits found and prompted updates to vulnerable Next.js/PostCSS and FastAPI/Starlette/pytest versions. The PostgreSQL round-trip exposed a lingering `importstate` enum on downgrade; the migration now drops it, with a SQLite round-trip recheck passing. PostgreSQL CI must rerun these fixes.
 - The six textbook PDFs remain private, untracked, and unprocessed by this task. The generated-PDF test is not evidence of textbook extraction accuracy.
 
+## Task 03.2 — PostgreSQL NUL and provenance hardening
+
+- Root cause from PostgreSQL CI run `39996812765`: psycopg raised `DataError` for an `INSERT INTO source_pages ... raw_text ...` because PDF-extracted text contained U+0000. The parameter was `raw_text` (PostgreSQL `VARCHAR`/text); the fixture-generated PDF text survives PyMuPDF extraction with the NUL intact.
+- Added a shared NUL-only sanitizer. Raw page/block/span/table extraction replaces U+0000 with U+FFFD, retains Korean/Vietnamese Unicode, and reports replacement counts in private quality metadata. SQLAlchemy String/Text/JSON bind types provide a final persistence guard, including nested JSON strings/keys.
+- Removed provenance's first-span fallback. Only matching `raw_block` spans or exact table-row labels can resolve; unresolved references are skipped, counted, and produce a review-required warning without document text.
+- Appendix headings now cap lesson segmentation before answer/transcript appendices; activity extraction still considers appendix blocks so sourced transcripts and answer keys can link to lesson content.
+- Regression tests use a generated PDF containing actual NUL characters in page/block/span and table-cell text; the end-to-end test checks sanitized PostgreSQL-bound fields, private quality metadata, retry/rollback, API reads, idempotency, and deletion.
+- Local validation: **19 API tests passed**; Alembic SQLite upgrade → downgrade → upgrade passed; frontend production build passed; `npm audit --omit=dev` reported **0 vulnerabilities**.
+- Docker/PostgreSQL is unavailable locally. PostgreSQL 16 migration and integration results for the new commit remain pending CI; no local PostgreSQL pass is claimed.
+
 ## Not yet verified
 
 - PostgreSQL integration and migration behavior against a live server; CI is configured but has not yet reported a result.

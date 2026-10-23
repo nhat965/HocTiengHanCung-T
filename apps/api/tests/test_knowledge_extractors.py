@@ -10,6 +10,7 @@ from app.models import Lesson, SourceBlock, SourceDocument, SourcePage, SourceSp
 from app.services.knowledge.layout import SourceTable, ordered_blocks
 from app.services.knowledge.pipeline import extract_knowledge, write_knowledge_json
 from app.services.knowledge.persistence import persist_bundle
+from app.services.knowledge.types import ExtractionBundle, SourceRef, VocabularyRecord
 from app.services.knowledge.vocabulary import extract_vocabulary
 
 
@@ -151,6 +152,51 @@ def test_pipeline_excludes_contents_pages_and_repeated_running_headers():
     assert not bundle.grammar
     assert any("Skipped likely table-of-contents pages: 1" in warning for warning in bundle.warnings)
     assert any("Filtered 1 repeated header/footer" in warning for warning in bundle.warnings)
+
+
+def test_appendix_pages_do_not_extend_final_lesson_but_transcripts_are_kept():
+    raw = {
+        "source": {"page_count": 3},
+        "pages": [
+            {
+                "pdf_page_number": 1,
+                "width": 600,
+                "height": 800,
+                "blocks": [{"index": 0, "text": "15 약속", "bbox": [50, 80, 200, 100]}],
+                "tables": [],
+            },
+            {
+                "pdf_page_number": 2,
+                "width": 600,
+                "height": 800,
+                "blocks": [{"index": 0, "text": "15 약속", "bbox": [50, 80, 200, 100]}],
+                "tables": [],
+            },
+            {
+                "pdf_page_number": 3,
+                "width": 600,
+                "height": 800,
+                "blocks": [
+                    {"index": 0, "text": "듣기 대본", "bbox": [50, 30, 200, 50]},
+                    {
+                        "index": 1,
+                        "text": "TRANSCRIPT[CD1TRACK01]: 안녕하세요.",
+                        "bbox": [50, 80, 450, 100],
+                    },
+                    {"index": 2, "text": "15 약속", "bbox": [50, 120, 200, 140]},
+                ],
+                "tables": [],
+            },
+        ],
+    }
+
+    bundle = extract_knowledge(raw)
+
+    assert [(item.ordinal, item.start_pdf_page, item.end_pdf_page) for item in bundle.lessons] == [
+        (15, 1, 2)
+    ]
+    assert [transcript.source.pdf_page_number for transcript in bundle.transcripts] == [3]
+    assert any("Excluded appendix pages from lesson segmentation: 3-3" in warning for warning in bundle.warnings)
 
 
 def test_extractors_create_source_linked_fixture_records(tmp_path: Path, client):
@@ -305,6 +351,22 @@ def test_extractors_create_source_linked_fixture_records(tmp_path: Path, client)
             raw_text="separate source",
         ))
         session.commit()
+
+        unresolved_bundle = ExtractionBundle(vocabulary=[
+            VocabularyRecord(
+                source=SourceRef(1, "1", block_index=999),
+                headword="검증",
+                normalized_headword="검증",
+                meanings_vi=["kiểm chứng"],
+            )
+        ])
+        unresolved_counts = persist_bundle(
+            session, textbook.id, unresolved_bundle, source_document.id,
+        )
+        session.commit()
+        assert unresolved_counts["unresolved_sources"] == 1
+        assert any("Source span unresolved" in warning for warning in unresolved_bundle.warnings)
+        assert session.scalar(select(func.count(Vocabulary.id))) == 0
 
         with pytest.raises(ValueError, match="source_document_id is required"):
             persist_bundle(session, textbook.id, bundle)

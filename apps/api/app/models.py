@@ -1,10 +1,13 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import JSON, DateTime, Enum as SqlEnum, ForeignKey, Integer, String, Table, Text, UniqueConstraint, Column
+from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, Table, UniqueConstraint, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+from app.text_sanitizer import SanitizedJSON as JSON
+from app.text_sanitizer import SanitizedString as String
+from app.text_sanitizer import SanitizedText as Text
 
 sentence_vocabulary = Table(
     "sentence_vocabulary",

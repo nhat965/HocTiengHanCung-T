@@ -17,6 +17,11 @@ from app.services.knowledge.types import ExtractionBundle
 from app.services.knowledge.vocabulary import extract_vocabulary
 
 _TOC_MARKER = re.compile(r"(?:목차|차례|mục\s*lục|contents)", re.I)
+_APPENDIX_TITLE = re.compile(
+    r"^(?:부록(?:\s+\d+)?|정답(?:\s+및\s+해설)?|듣기\s*대본|대본|"
+    r"모범\s*답안|answer\s*key|transcripts?)\s*[:：]?$",
+    re.I,
+)
 
 
 def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
@@ -31,6 +36,18 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
         page_number for page_number, blocks in blocks_by_page.items()
         if any(_TOC_MARKER.search(block.text) for block in blocks)
     }
+    appendix_start = min(
+        (
+            page_number
+            for page_number, blocks in blocks_by_page.items()
+            if any(
+                not block.is_header_footer_candidate
+                and _APPENDIX_TITLE.fullmatch(" ".join(block.text.split()))
+                for block in blocks
+            )
+        ),
+        default=None,
+    )
     header_page_occurrences: dict[str, set[int]] = defaultdict(set)
     for page_number, blocks in blocks_by_page.items():
         for block in blocks:
@@ -41,27 +58,41 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
         if len(page_numbers) > 1
     }
     all_blocks = []
-    tables = []
+    content_blocks = []
+    content_tables = []
     for page in pages:
         page_number = int(page["pdf_page_number"])
         if page_number in toc_pages:
             continue
         blocks = blocks_by_page[page_number]
-        all_blocks.extend(
+        page_blocks = [
             block for block in blocks
             if not (
                 block.is_header_footer_candidate
                 and " ".join(block.text.casefold().split()) in repeated_running_text
             )
-        )
-        tables.extend(page_tables(page))
-    bundle.lessons = add_lesson_end_pages(
-        detect_lessons(all_blocks),
-        int(raw_document.get("source", {}).get("page_count") or max((p["pdf_page_number"] for p in pages), default=0)),
+        ]
+        all_blocks.extend(page_blocks)
+        page_tables_for_extraction = page_tables(page)
+        if appendix_start is None or page_number < appendix_start:
+            content_blocks.extend(page_blocks)
+            content_tables.extend(page_tables_for_extraction)
+    document_page_count = int(
+        raw_document.get("source", {}).get("page_count")
+        or max((p["pdf_page_number"] for p in pages), default=0)
     )
-    bundle.sections = detect_sections(all_blocks)
-    bundle.vocabulary = extract_vocabulary(tables)
-    bundle.grammar, bundle.sentences = extract_grammar(all_blocks)
+    lesson_page_limit = (
+        min(document_page_count, appendix_start - 1)
+        if appendix_start is not None
+        else document_page_count
+    )
+    bundle.lessons = add_lesson_end_pages(
+        detect_lessons(content_blocks),
+        lesson_page_limit,
+    )
+    bundle.sections = detect_sections(content_blocks)
+    bundle.vocabulary = extract_vocabulary(content_tables)
+    bundle.grammar, bundle.sentences = extract_grammar(content_blocks)
     (
         bundle.dialogue_turns,
         bundle.passages,
@@ -78,6 +109,10 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
     if repeated_running_text:
         bundle.warnings.append(
             f"Filtered {len(repeated_running_text)} repeated header/footer candidates"
+        )
+    if appendix_start is not None:
+        bundle.warnings.append(
+            f"Excluded appendix pages from lesson segmentation: {appendix_start}-{document_page_count}"
         )
     return bundle
 

@@ -83,6 +83,7 @@ def _raw_document(source: SourceDocument, pages: list[RawPage]) -> dict[str, Any
                 "height": page.height,
                 "rotation": page.rotation,
                 "text": page.text,
+                "sanitized_nul_count": page.sanitized_nul_count,
                 "blocks": [
                     {
                         "index": block.index,
@@ -316,6 +317,9 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
             total_pages=source_document.page_count or len(pages),
         )
         summary["persistence"] = counts
+        summary["text_sanitization"] = {
+            "nul_replacements": sum(page.sanitized_nul_count for page in pages),
+        }
         job = session.get(ImportJob, job_id)
         if job is None:
             raise RuntimeError("Import job disappeared while writing quality report")
