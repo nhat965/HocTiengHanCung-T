@@ -77,7 +77,7 @@
 - Appendix headings now cap lesson segmentation before answer/transcript appendices; activity extraction still considers appendix blocks so sourced transcripts and answer keys can link to lesson content.
 - Regression tests use a generated PDF containing actual NUL characters in page/block/span and table-cell text; the end-to-end test checks sanitized PostgreSQL-bound fields, private quality metadata, retry/rollback, API reads, idempotency, and deletion.
 - Local validation: **19 API tests passed**; Alembic SQLite upgrade → downgrade → upgrade passed; frontend production build passed; `npm audit --omit=dev` reported **0 vulnerabilities**.
-- Docker/PostgreSQL is unavailable locally. PostgreSQL 16 migration and integration results for the new commit remain pending CI; no local PostgreSQL pass is claimed.
+- Local Docker/PostgreSQL is unavailable. PostgreSQL 16 validation passed in GitHub Actions run `39999172404` on code commit `71e95eece2667110da691bfc20bfc6caa459e753`: Alembic upgrade/downgrade/upgrade, **18 passed, 1 skipped**, and the `web-build` job all succeeded; dependency audit reported no known vulnerabilities.
 
 ## Not yet verified
 

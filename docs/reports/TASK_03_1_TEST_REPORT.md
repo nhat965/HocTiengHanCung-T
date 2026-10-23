@@ -66,8 +66,7 @@ PostgreSQL service could not be started.
 
 The PR workflow configures PostgreSQL 16 and runs Alembic upgrade/downgrade/
 upgrade, the API test suite against the migrated PostgreSQL database,
-dependency audits, and the frontend production build. It must run successfully
-on the pushed PR branch before PostgreSQL or CI acceptance can be claimed.
+dependency audits, and the frontend production build.
 The initial run detected a vulnerable transitive PostCSS dependency under the
 existing Next.js version. Next.js was upgraded to 16.4.3; the production audit
 now reports zero vulnerabilities, and the local production build passes. The
@@ -77,8 +76,15 @@ against those versions locally. CI then exposed a PostgreSQL downgrade/upgrade
 failure because the base migration left its enum type behind; the downgrade
 now explicitly removes that PostgreSQL type. SQLite migration round-trip
 passes with the fix.
-**PostgreSQL 16 validation for the NUL/provenance changes is pending on the
-updated PR branch; it is not yet claimed.**
+GitHub Actions run
+[39999172404](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/39999172404)
+passed on code commit
+[`71e95ee`](https://github.com/nhat965/HocTiengHanCung-T/commit/71e95eece2667110da691bfc20bfc6caa459e753).
+The `api-postgres` job completed Alembic upgrade → downgrade → upgrade, passed
+the PostgreSQL 16 API suite (**18 passed, 1 skipped**) and Python dependency
+audit. The `web-build` job passed the production build and npm audit (0
+vulnerabilities). The skipped test is an environment-conditional test; the
+generated PDF end-to-end regression itself passed.
 
 ## Known unverified behavior
 
