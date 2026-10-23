@@ -16,15 +16,18 @@ from app.models import (
     ListeningTrack,
     Passage,
     Sentence,
+    SentenceIdentity,
     SourcePage,
     SourceBlock,
     SourceDocument,
     SourceSpan,
+    Textbook,
     Transcript,
     Vocabulary,
     WordSense,
 )
 from app.services.knowledge.types import ExtractionBundle, SourceRef
+from app.services.normalization import normalize_korean_key
 
 
 def _source_span_id(
@@ -91,7 +94,7 @@ def persist_bundle(
     """Idempotently persist an extraction bundle without changing reviewed rows."""
     counts = {
         "lessons": 0, "sections": 0, "vocabulary": 0, "word_senses": 0,
-        "grammar": 0, "sentences": 0, "dialogues": 0, "dialogue_turns": 0,
+        "grammar": 0, "sentence_identities": 0, "sentences": 0, "dialogues": 0, "dialogue_turns": 0,
         "passages": 0, "exercises": 0, "exercise_options": 0,
         "listening_tracks": 0, "transcripts": 0, "answers": 0,
     }
@@ -256,6 +259,7 @@ def persist_bundle(
             grammar_ids[item.normalized_pattern] = row.id
             _provenance(session, "grammar", row.id, span_id, item.extraction_method, item.extraction_version)
 
+        owner_id = session.scalar(select(Textbook.owner_id).where(Textbook.id == textbook_id))
         sentence_ids: dict[str, int] = {}
         for item in bundle.sentences:
             lesson_id = lesson_for_page(item.source.pdf_page_number)
@@ -267,9 +271,23 @@ def persist_bundle(
             span_id = resolve_source(item.source)
             if span_id is None:
                 continue
+            normalized_text = normalize_korean_key(item.text_ko)
+            identity = session.scalar(select(SentenceIdentity).where(
+                SentenceIdentity.owner_id == owner_id,
+                SentenceIdentity.normalized_text_ko == normalized_text,
+            ))
+            if identity is None:
+                identity = SentenceIdentity(
+                    owner_id=owner_id,
+                    canonical_text_ko=item.text_ko,
+                    normalized_text_ko=normalized_text,
+                )
+                session.add(identity)
+                session.flush()
+                counts["sentence_identities"] += 1
             if row is None:
                 row = Sentence(
-                    lesson_id=lesson_id, text_ko=item.text_ko, text_vi=item.text_vi,
+                    identity_id=identity.id, lesson_id=lesson_id, text_ko=item.text_ko, text_vi=item.text_vi,
                     source_span_id=span_id, review_status=item.review_status,
                     extraction_version=item.extraction_version,
                 )
@@ -277,6 +295,7 @@ def persist_bundle(
                 session.flush()
                 counts["sentences"] += 1
             elif row.review_status not in {"approved", "reviewed"}:
+                row.identity_id = identity.id
                 row.source_span_id = span_id
                 row.version += 1
             sentence_ids[item.local_id] = row.id

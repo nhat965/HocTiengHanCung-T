@@ -5,6 +5,8 @@ from sqlalchemy.orm import Session
 from app.database import get_session
 from app.models import (
     AnswerKey,
+    Dialogue,
+    DialogueTurn,
     Exercise,
     ExerciseOption,
     GrammarPattern,
@@ -20,6 +22,8 @@ from app.models import (
     WordSense,
 )
 from app.schemas import (
+    DialogueResponse,
+    DialogueTurnResponse,
     ExerciseResponse,
     GrammarResponse,
     LessonResponse,
@@ -194,7 +198,7 @@ def lesson_sentences(
     rows = session.scalars(query.order_by(Sentence.id).offset(offset).limit(limit)).all()
     return [
         SentenceResponse(
-            id=item.id, text_ko=item.text_ko, text_vi=item.text_vi,
+            id=item.id, identity_id=item.identity_id, text_ko=item.text_ko, text_vi=item.text_vi,
             source_page_number=_source_pdf_page(session, item.source_span_id),
             review_status=item.review_status,
         )
@@ -249,6 +253,42 @@ def lesson_listening(
             )) is not None,
             source_page_number=_source_pdf_page(session, item.source_span_id),
             review_status=item.review_status,
+        )
+        for item in rows
+    ]
+
+
+@lesson_router.get("/{lesson_id}/dialogues", response_model=list[DialogueResponse])
+def lesson_dialogues(
+    lesson_id: int,
+    session: Session = Depends(get_session),
+    owner_id: str = Depends(get_current_owner),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+) -> list[DialogueResponse]:
+    _lesson_or_404(session, lesson_id, owner_id)
+    rows = session.scalars(
+        select(Dialogue).where(Dialogue.lesson_id == lesson_id)
+        .order_by(Dialogue.id).offset(offset).limit(limit)
+    ).all()
+    return [
+        DialogueResponse(
+            id=item.id,
+            group_identifier=item.group_identifier,
+            topic=item.topic,
+            source_page_number=_source_pdf_page(session, item.source_span_id),
+            turns=[
+                DialogueTurnResponse(
+                    turn_index=turn.turn_index,
+                    speaker=turn.speaker,
+                    text_ko=turn.text,
+                    text_vi=turn.text_vi,
+                )
+                for turn in session.scalars(
+                    select(DialogueTurn).where(DialogueTurn.dialogue_id == item.id)
+                    .order_by(DialogueTurn.turn_index)
+                ).all()
+            ],
         )
         for item in rows
     ]

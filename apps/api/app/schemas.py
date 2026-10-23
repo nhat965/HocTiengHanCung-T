@@ -84,6 +84,7 @@ class ExerciseResponse(BaseModel):
 
 class SentenceResponse(BaseModel):
     id: int
+    identity_id: int | None = None
     text_ko: str
     text_vi: str | None
     source_page_number: int | None
@@ -105,6 +106,34 @@ class ListeningResponse(BaseModel):
     transcript_available: bool
     source_page_number: int | None
     review_status: str
+
+
+class DialogueTurnResponse(BaseModel):
+    turn_index: int
+    speaker: str | None
+    text_ko: str
+    text_vi: str | None
+
+
+class DialogueResponse(BaseModel):
+    id: int
+    group_identifier: str | None
+    topic: str | None
+    turns: list[DialogueTurnResponse] = Field(default_factory=list)
+    source_page_number: int | None
+
+
+class ReviewUpdate(BaseModel):
+    status: Literal["pending_review", "approved", "rejected", "unresolved"]
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class ReviewRecordResponse(BaseModel):
+    entity_type: str
+    entity_id: int
+    review_status: str
+    source_page_number: int | None = None
+    preview: str
 
 
 class DeleteDocumentResponse(BaseModel):

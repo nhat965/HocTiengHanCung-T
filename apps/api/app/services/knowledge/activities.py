@@ -10,6 +10,7 @@ from app.services.knowledge.types import (
     SourceRef,
     TranscriptRecord,
 )
+from app.services.normalization import normalize_track_id
 
 _DIALOGUE = re.compile(r"^\s*DIALOGUE(?:\[(?P<id>[\w.-]+)\])?\s*:\s*(?P<topic>.*)$", re.I)
 _TURN = re.compile(r"^\s*(?P<speaker>[^:|]+)\s*:\s*(?P<ko>[^|]+?)(?:\s*\|\|\s*(?P<vi>.*))?$")
@@ -143,7 +144,7 @@ def extract_activities(
             continue
         track = _TRACK.search(text)
         if track:
-            track_id = f"CD{int(track.group('disc'))}TRACK{int(track.group('track')):02d}"
+            track_id = normalize_track_id(f"CD{track.group('disc')}TRACK{track.group('track')}")
             if track_id not in track_ids:
                 track_ids.add(track_id)
                 tracks.append(ListeningTrackRecord(
@@ -154,7 +155,7 @@ def extract_activities(
                 ))
         transcript = _TRANSCRIPT.match(text)
         if transcript:
-            track_id = re.sub(r"[^A-Za-z0-9]", "", transcript.group("track")).upper()
+            track_id = normalize_track_id(transcript.group("track"))
             transcripts.append(TranscriptRecord(
                 source=source,
                 track_identifier=track_id,

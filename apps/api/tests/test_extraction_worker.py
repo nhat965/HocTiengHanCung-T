@@ -15,6 +15,7 @@ from app.models import (
     Lesson,
     Passage,
     Sentence,
+    SentenceIdentity,
     SourceBlock,
     SourceDocument,
     SourcePage,
@@ -197,6 +198,8 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
         assert session.scalar(select(func.count(GrammarPattern.id))) == 1
         assert session.scalar(select(func.count(Vocabulary.id))) == 2
         assert session.scalar(select(func.count(Sentence.id))) == 1
+        assert session.scalar(select(func.count(SentenceIdentity.id))) == 1
+        assert session.scalar(select(Sentence.identity_id)) is not None
         assert session.scalar(select(func.count(Passage.id))) == 1
         assert session.scalar(select(func.count(ContentProvenance.id))) > 0
         assert session.scalar(select(GrammarPattern)).pattern == "reviewed grammar"
@@ -205,7 +208,7 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
     assert deletion.status_code == 200
     with database.SessionLocal() as session:
         for model in (
-            ContentProvenance, GrammarPattern, Lesson, Passage, Sentence,
+            ContentProvenance, GrammarPattern, Lesson, Passage, Sentence, SentenceIdentity,
             SourceBlock, SourcePage, SourceSpan, Vocabulary,
         ):
             assert session.scalar(select(func.count(model.id))) == 0
