@@ -8,20 +8,32 @@ from sqlalchemy import func, select, update
 
 from app import database
 from app.models import (
+    AnswerKey,
     ContentProvenance,
+    Dialogue,
+    DialogueTurn,
+    Exercise,
+    ExerciseOption,
+    GrammarNote,
     GrammarPattern,
     ImportJob,
     ImportState,
     Lesson,
+    LessonProgress,
+    ListeningTrack,
     Passage,
     Sentence,
     SentenceIdentity,
+    StudyAttempt,
     SourceBlock,
     SourceDocument,
     SourcePage,
     SourceSpan,
     Textbook,
+    Transcript,
     Vocabulary,
+    VocabularyProgress,
+    WordSense,
 )
 from app.services import extraction_worker
 from app.services.extraction_worker import recover_stale_jobs, run_job, run_next_job
@@ -37,18 +49,35 @@ def _korean_font() -> Path | None:
     return next((path for path in candidates if path.is_file()), None)
 
 
+def _vietnamese_font() -> Path | None:
+    candidates = [
+        Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / "arial.ttf",
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        Path("/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf"),
+    ]
+    return next((path for path in candidates if path.is_file()), None)
+
+
 def _write_structured_fixture(path: Path) -> None:
     font_path = _korean_font()
-    if font_path is None:
-        pytest.skip("A Korean font is required to generate a real PDF extraction fixture")
+    vietnamese_font_path = _vietnamese_font()
+    if font_path is None or vietnamese_font_path is None:
+        pytest.skip("Korean and Vietnamese fonts are required for the real PDF extraction fixture")
     pdf = fitz.open()
     page = pdf.new_page()
     page.insert_font(fontname="korean", fontfile=str(font_path))
+    page.insert_font(fontname="vietnamese", fontfile=str(vietnamese_font_path))
+    korean_font = fitz.Font(fontfile=str(font_path))
+    vietnamese_font = fitz.Font(fontfile=str(vietnamese_font_path))
     content = [
         ("01 유행", True),
         ("Fixture NUL: before\x00after", False),
         ("GRAMMAR: -아/어 보다 || thử làm", True),
         ("EXAMPLE: 책을 읽어 봐요. || Tôi thử đọc sách.", True),
+        ("DIALOGUE[dlg1]: At a cafe", False),
+        ("민수: 커피 주세요. || Cho tôi cà phê.", True),
+        ("영희: 여기 있습니다. || Đây ạ.", True),
         ("READING[read1]: A short story", False),
         ("PARAGRAPH: first paragraph", False),
         ("PARAGRAPH: second paragraph", False),
@@ -61,21 +90,37 @@ def _write_structured_fixture(path: Path) -> None:
         ("ANSWER[grp1.q1]: A", False),
     ]
     for index, (line, korean) in enumerate(content):
-        page.insert_text(
-            (55, 130 + index * 34),
-            line,
-            fontname="korean" if korean else "helv",
-            fontsize=11,
-        )
+        baseline = 130 + index * 34
+        if korean and " || " in line:
+            korean_text, vietnamese_text = line.split(" || ", maxsplit=1)
+            prefix = korean_text + " || "
+            writer = fitz.TextWriter(page.rect)
+            writer.append(
+                fitz.Point(55, baseline), prefix,
+                font=korean_font, fontsize=11,
+            )
+            x = 55 + korean_font.text_length(prefix, fontsize=11)
+            writer.append(
+                fitz.Point(x, baseline), vietnamese_text,
+                font=vietnamese_font, fontsize=11,
+            )
+            writer.write_text(page)
+        else:
+            page.insert_text(
+                (55, baseline),
+                line,
+                fontname="korean" if korean else "helv",
+                fontsize=11,
+            )
     for x in (50, 300, 550):
-        page.draw_line((x, 600), (x, 700), color=(0, 0, 0), width=1)
-    for y in (600, 630, 660, 700):
+        page.draw_line((x, 700), (x, 800), color=(0, 0, 0), width=1)
+    for y in (700, 730, 760, 800):
         page.draw_line((50, y), (550, y), color=(0, 0, 0), width=1)
-    page.insert_text((60, 622), "사과", fontname="korean", fontsize=11)
-    page.insert_text((310, 622), "quả táo", fontsize=11)
-    page.insert_text((60, 652), "가다", fontname="korean", fontsize=11)
-    page.insert_text((310, 652), "đi", fontsize=11)
-    page.insert_text((310, 682), "NUL table cell: before\x00after", fontsize=9)
+    page.insert_text((60, 722), "사과", fontname="korean", fontsize=11)
+    page.insert_text((310, 722), "quả táo", fontname="vietnamese", fontsize=11)
+    page.insert_text((60, 752), "가다", fontname="korean", fontsize=11)
+    page.insert_text((310, 752), "đi", fontname="vietnamese", fontsize=11)
+    page.insert_text((310, 782), "NUL table cell: before\x00after", fontsize=9)
     pdf.save(path)
     pdf.close()
 
@@ -208,8 +253,150 @@ def test_registered_fixture_runs_through_database_api_retry_and_delete(client, t
     assert deletion.status_code == 200
     with database.SessionLocal() as session:
         for model in (
-            ContentProvenance, GrammarPattern, Lesson, Passage, Sentence, SentenceIdentity,
+            ContentProvenance, Dialogue, DialogueTurn, GrammarPattern, Lesson, Passage, Sentence, SentenceIdentity,
             SourceBlock, SourcePage, SourceSpan, Vocabulary,
+        ):
+            assert session.scalar(select(func.count(model.id))) == 0
+
+
+def test_fixture_supports_private_learning_journey(client, tmp_path):
+    fixture = tmp_path / "learning-fixture.pdf"
+    _write_structured_fixture(fixture)
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(fixture),
+        "title": "Synthetic learning fixture",
+        "level": "intermediate",
+        "volume_number": 4,
+        "rights_status": "authorized",
+    })
+    assert registered.status_code == 202
+    document_id = registered.json()["source_document_id"]
+    job_id = registered.json()["job_id"]
+    assert client.post(f"/api/v1/imports/{job_id}/queue").status_code == 200
+    with database.SessionLocal() as session:
+        result = run_next_job(session)
+        assert result is not None and result.state == ImportState.needs_review
+        assert result.record_counts["lessons"] == 1
+        assert result.record_counts["vocabulary"] == 2
+        assert result.record_counts["word_senses"] == 2
+        assert result.record_counts["grammar"] == 1
+        assert result.record_counts["sentences"] == 1
+        assert result.record_counts["dialogue_turns"] == 2
+        assert result.record_counts["passages"] == 1
+        assert result.record_counts["exercises"] == 2
+        assert result.record_counts["exercise_options"] == 2
+        assert result.record_counts["answers"] == 1
+        assert result.record_counts["listening_tracks"] == 1
+        assert result.record_counts["transcripts"] == 1
+        lesson_id = session.scalar(select(Lesson.id))
+        assert lesson_id is not None
+    assert client.get(f"/api/v1/lessons/{lesson_id}/dialogues").json() == []
+
+    models_by_entity = {
+        "vocabulary": Vocabulary,
+        "word_sense": WordSense,
+        "dialogue_turn": DialogueTurn,
+        "grammar": GrammarPattern,
+        "sentence": Sentence,
+        "passage": Passage,
+        "exercise": Exercise,
+        "exercise_option": ExerciseOption,
+        "answer_key": AnswerKey,
+        "listening_track": ListeningTrack,
+        "transcript": Transcript,
+    }
+    approvals = []
+    with database.SessionLocal() as session:
+        for entity_type, model in models_by_entity.items():
+            for record in session.scalars(select(model)).all():
+                source_span_id = session.scalar(select(ContentProvenance.source_span_id).where(
+                    ContentProvenance.entity_type == entity_type,
+                    ContentProvenance.entity_id == record.id,
+                ).order_by(ContentProvenance.id))
+                if source_span_id is not None:
+                    approvals.append((entity_type, record.id, record.version, source_span_id))
+    assert approvals
+    for entity_type, entity_id, version, source_span_id in approvals:
+        response = client.post(f"/api/v1/review/{entity_type}/{entity_id}", json={
+            "status": "approved",
+            "expected_version": version,
+            "source_span_id": source_span_id,
+            "reviewer_action": "compared_to_source",
+            "checks": ["source_text", "source_position"],
+        })
+        assert response.status_code == 200, response.text
+
+    books = client.get("/api/v1/textbooks").json()
+    assert len(books) == 1
+    assert books[0]["data_status"] == "ready"
+    assert books[0]["lesson_count"] == 1
+    lessons = client.get(f"/api/v1/textbooks/{books[0]['id']}/lessons").json()
+    assert len(lessons) == 1 and lessons[0]["id"] == lesson_id
+    assert lessons[0]["vocabulary_count"] == 2
+    assert lessons[0]["grammar_count"] == 1
+
+    exercise_response = client.get(
+        f"/api/v1/lessons/{lesson_id}/exercises?review_status=approved"
+    )
+    assert exercise_response.status_code == 200
+    exercises = exercise_response.json()
+    assert len(exercises) == 2
+    assert sum(item["has_children"] for item in exercises) == 1
+    assert all("parent_exercise_id" in item for item in exercises)
+    assert all("answer_revealed" not in item and "answer_key" not in item for item in exercises)
+    dialogues = client.get(f"/api/v1/lessons/{lesson_id}/dialogues").json()
+    assert len(dialogues) == 1 and len(dialogues[0]["turns"]) == 2
+    flashcards = client.get(f"/api/v1/study/lessons/{lesson_id}/flashcards").json()
+    assert len(flashcards) == 2
+    assert {
+        card["headword"]: card["meanings_vi"]
+        for card in flashcards
+    } == {"사과": ["quả táo"], "가다": ["đi"]}
+
+    first_card = flashcards[0]
+    learned = client.post(f"/api/v1/study/vocabulary/{first_card['vocabulary_id']}/learned")
+    assert learned.status_code == 200 and learned.json()["status"] == "learned"
+
+    with database.SessionLocal() as session:
+        grammar_id = session.scalar(select(GrammarPattern.id))
+    assert grammar_id is not None
+    note = client.post(f"/api/v1/study/grammar/{grammar_id}/note", json={"note": "Ôn lại cấu trúc này"})
+    assert note.status_code == 200
+    assert client.get(f"/api/v1/study/grammar/{grammar_id}/note").json()["note"] == "Ôn lại cấu trúc này"
+
+    choice_exercise = next(item for item in exercises if item["options"])
+    submitted = client.post(
+        f"/api/v1/study/exercises/{choice_exercise['id']}/attempt",
+        json={"answer": "A"},
+    )
+    assert submitted.status_code == 200
+    assert submitted.json()["correct"] is True
+    assert submitted.json()["answer_revealed"] == "A"
+
+    assert client.post(f"/api/v1/study/lessons/{lesson_id}/open").status_code == 200
+    assert client.post(f"/api/v1/study/lessons/{lesson_id}/complete").status_code == 200
+    persisted_progress = client.get("/api/v1/study/progress").json()
+    refreshed_progress = client.get("/api/v1/study/progress").json()
+    assert persisted_progress == refreshed_progress
+    assert refreshed_progress["learned_vocabulary"] == 1
+    assert refreshed_progress["attempts"] == 1
+    assert refreshed_progress["completed_lessons"] == 1
+    assert client.get(f"/api/v1/textbooks/{books[0]['id']}/lessons").json()[0]["progress_status"] == "completed"
+    quality = client.get(f"/api/v1/imports/{job_id}/report")
+    assert quality.status_code == 200
+    assert quality.json()["quality"]["structural_counts"]["vocabulary"] == 2
+    assert quality.json()["quality"]["structural_counts"]["grammar_patterns"] == 1
+    assert quality.json()["raw_extraction"]["accuracy_note"].startswith(
+        "Accuracy is intentionally not estimated"
+    )
+
+    assert client.delete(f"/api/v1/imports/documents/{document_id}").status_code == 200
+    with database.SessionLocal() as session:
+        for model in (
+            AnswerKey, ContentProvenance, Dialogue, DialogueTurn, Exercise, ExerciseOption, GrammarNote,
+            GrammarPattern, Lesson, LessonProgress, ListeningTrack, Passage,
+            Sentence, StudyAttempt, Transcript, Vocabulary, VocabularyProgress,
+            WordSense,
         ):
             assert session.scalar(select(func.count(model.id))) == 0
 

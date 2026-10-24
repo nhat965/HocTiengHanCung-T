@@ -11,7 +11,11 @@ structured extraction, validation, database persistence, and per-job quality
 reporting. The workflow is tested with a generated synthetic PDF only. The six
 source PDFs remain local and untracked; this task has not extracted their
 contents into structured records. PostgreSQL validation is configured in CI
-but is pending a successful CI run. See the [source audit](docs/reports/SOURCE_PDF_AUDIT.md),
+for the existing data-engine branch; Task 07's new migrations and learner flow
+still require PostgreSQL CI verification. The private Books/Lessons/lesson
+learning flow is described in
+[LEARNING_VERTICAL_SLICE.md](docs/reports/LEARNING_VERTICAL_SLICE.md). See the
+[source audit](docs/reports/SOURCE_PDF_AUDIT.md),
 [raw pilot results](docs/reports/EXTRACTION_RESULTS.md),
 [Task 03 report](docs/reports/LESSON_01_STRUCTURED_EXTRACTION.md),
 [data quality report](docs/reports/DATA_QUALITY.md),
@@ -39,12 +43,19 @@ distribution rights have been confirmed.
 4. Run database migrations from `apps/api`: `python -m alembic upgrade head`.
 5. Run API tests: `python -m pytest apps/api/tests`.
 6. Install web dependencies: `npm install`.
-7. Run the API: `npm run dev:api`.
-8. Run the web application in another terminal: `npm run dev:web`.
+7. Copy `apps/web/.env.local.example` to `apps/web/.env.local`. Set
+   `PRIVATE_API_TOKEN` to the same secret as the API, configure a strong
+   `PRIVATE_WEB_PASSWORD`, and set `PRIVATE_WEB_SESSION_SECRET` to at least 32
+   random characters. These variables must remain server-side; do not use
+   `NEXT_PUBLIC_` names for secrets.
+8. Run the API: `npm run dev:api`.
+9. Run the web application in another terminal: `npm run dev:web`.
 
 Private API routes require bearer authentication and are scoped to the
-configured owner. Do not place the API bearer secret in the public frontend.
-This is a single-owner deployment boundary, not multi-user account management.
+configured owner. The web app gates private API proxy requests behind an
+HttpOnly, signed, one-day session cookie and the server-side password setting.
+This is a single-owner personal deployment boundary, not multi-user account
+management; use it behind a trusted network or reverse proxy.
 Imports must be below `PDF_IMPORT_ROOT` and are copied into owner-scoped
 `PRIVATE_STORAGE_ROOT`. Rights default to `unverified`; queueing extraction
 requires a user-declared `authorized` status. This declaration is not legal

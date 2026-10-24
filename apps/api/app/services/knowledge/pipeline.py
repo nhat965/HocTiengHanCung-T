@@ -8,6 +8,7 @@ from typing import Any
 from app.services.knowledge.activities import extract_activities
 from app.services.knowledge.grammar import extract_grammar
 from app.services.knowledge.layout import ordered_blocks, page_tables
+from app.services.knowledge.real_layout import extract_real_layout
 from app.services.knowledge.segmentation import (
     add_lesson_end_pages,
     detect_lessons,
@@ -77,9 +78,16 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
         if appendix_start is None or page_number < appendix_start:
             content_blocks.extend(page_blocks)
             content_tables.extend(page_tables_for_extraction)
-    document_page_count = int(
+    declared_page_count = int(
         raw_document.get("source", {}).get("page_count")
         or max((p["pdf_page_number"] for p in pages), default=0)
+    )
+    processed_page_count = len(pages)
+    processed_page_end = max((p["pdf_page_number"] for p in pages), default=0)
+    document_page_count = (
+        processed_page_end
+        if processed_page_count < declared_page_count
+        else declared_page_count
     )
     lesson_page_limit = (
         min(document_page_count, appendix_start - 1)
@@ -91,7 +99,7 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
         lesson_page_limit,
     )
     bundle.sections = detect_sections(content_blocks)
-    bundle.vocabulary = extract_vocabulary(content_tables)
+    bundle.vocabulary = extract_vocabulary(content_tables, content_blocks)
     bundle.grammar, bundle.sentences = extract_grammar(content_blocks)
     (
         bundle.dialogue_turns,
@@ -100,6 +108,13 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
         bundle.listening_tracks,
         bundle.transcripts,
     ) = extract_activities(all_blocks)
+    real_dialogues, real_passages, real_exercises = extract_real_layout(content_blocks)
+    if not bundle.dialogue_turns:
+        bundle.dialogue_turns = real_dialogues
+    if not bundle.passages:
+        bundle.passages = real_passages
+    if not bundle.exercises:
+        bundle.exercises = real_exercises
     bundle.warnings.extend(validate_bundle(bundle, {int(page["pdf_page_number"]) for page in pages}))
     if toc_pages:
         bundle.warnings.append(

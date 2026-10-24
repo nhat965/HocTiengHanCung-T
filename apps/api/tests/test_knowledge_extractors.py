@@ -399,3 +399,66 @@ def test_extractors_create_source_linked_fixture_records(tmp_path: Path, client)
     assert client.get(f"/api/v1/lessons/{lesson_id}/reading").status_code == 200
     assert client.get(f"/api/v1/lessons/{lesson_id}/listening").json()[0]["audio_status"] == "missing"
     assert client.get(f"/api/v1/lessons/{lesson_id}/exercises").status_code == 200
+
+
+def test_real_layout_bilingual_cells_glossary_and_grammar_are_extracted():
+    from app.services.knowledge.grammar import extract_grammar
+    from app.services.knowledge.layout import SourceBlock, SourceTable
+    from app.services.knowledge.vocabulary import extract_vocabulary
+
+    tables = [SourceTable(
+        page_number=2,
+        printed_page_number="1",
+        table_index=0,
+        bbox=(10, 10, 500, 200),
+        rows=[["모자\ncái mũ", "신발\ngiày dép"]],
+    )]
+    blocks = [
+        SourceBlock(3, "2", 0, "새 단어", (40, 100, 100, 120), 600, 800, False),
+        SourceBlock(3, "2", 1, "정확하다", (50, 150, 120, 170), 600, 800, False),
+        SourceBlock(3, "2", 2, "chính xác", (50, 172, 140, 190), 600, 800, False),
+        SourceBlock(4, "3", 0, "-아/어 보다", (50, 50, 180, 70), 600, 800, False),
+        SourceBlock(4, "3", 1, "Được dùng để diễn tả việc thử thực hiện một hành động.", (50, 80, 500, 110), 600, 800, False),
+        SourceBlock(4, "3", 2, "이 옷을 입어 봐요.", (70, 180, 260, 200), 600, 800, False),
+    ]
+
+    vocabulary = extract_vocabulary(tables, blocks)
+    assert [(item.headword, item.meanings_vi) for item in vocabulary] == [
+        ("모자", ["cái mũ"]),
+        ("신발", ["giày dép"]),
+        ("정확하다", ["chính xác"]),
+    ]
+    grammar, sentences = extract_grammar(blocks)
+    assert grammar[0].pattern == "-아/어 보다"
+    assert grammar[0].explanation_vi is not None
+    assert sentences[0].text_ko == "이 옷을 입어 봐요."
+    assert grammar[0].example_ids == [sentences[0].local_id]
+
+
+def test_real_layout_passages_dialogues_and_exercises_remain_source_linked():
+    from app.services.knowledge.layout import SourceBlock
+    from app.services.knowledge.real_layout import extract_real_layout
+
+    def block(index: int, text: str, page: int = 10) -> SourceBlock:
+        return SourceBlock(page, str(page - 1), index, text, (50, 50 + index * 20, 500, 70 + index * 20), 600, 800, False)
+
+    blocks = [
+        block(0, "말하기"),
+        block(1, "A 안녕하세요."),
+        block(2, "B 반갑습니다."),
+        block(3, "1 사진을 보고 이야기해 보십시오."),
+        block(4, "읽기", 11),
+        block(5, "한국어를 배우는 사람들은 여러 가지 방법으로 매일 연습합니다. " * 3, 11),
+        block(6, "2 잘 읽고 질문에 답하십시오.", 11),
+        block(7, "(1) 글의 중심 생각은 무엇입니까?", 11),
+        block(8, "듣기", 12),
+        block(9, "1 대화를 듣고 답하십시오. CD1 TRACK 02", 12),
+        block(10, "(1) 들은 내용과 같은 것을 고르십시오. ⓐ 하나 ⓑ 둘", 12),
+    ]
+    dialogues, passages, exercises = extract_real_layout(blocks)
+    assert [turn.speaker for turn in dialogues] == ["A", "B"]
+    assert passages[0].source.pdf_page_number == 11
+    assert any(item.parent_id for item in exercises)
+    listening_question = next(item for item in exercises if item.listening_track_id and item.options)
+    assert listening_question.listening_track_id == "CD1TRACK02"
+    assert listening_question.options

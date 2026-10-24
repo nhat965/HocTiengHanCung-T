@@ -5,13 +5,15 @@ import io
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy import select
+from sqlalchemy import String, cast, func, literal, select, union_all
 from sqlalchemy.orm import Session
 
 from app.database import get_session
 from app.models import (
-    ContentReview, Dialogue, DialogueTurn, Exercise, GrammarPattern, Lesson,
-    ListeningTrack, Passage, Sentence, Textbook, Vocabulary,
+    AnswerKey, ContentProvenance, ContentReview, Dialogue, DialogueTurn,
+    Exercise, ExerciseOption, GrammarPattern, Lesson, ListeningTrack, Passage,
+    Sentence, SourceDocument, SourcePage, SourceSpan, Textbook, Transcript,
+    Vocabulary, WordSense,
 )
 from app.schemas import ReviewRecordResponse, ReviewUpdate
 from app.security import get_current_owner
@@ -28,6 +30,10 @@ _DIRECT_MODELS = {
     "exercise": Exercise,
     "listening_track": ListeningTrack,
     "dialogue_turn": DialogueTurn,
+    "word_sense": WordSense,
+    "exercise_option": ExerciseOption,
+    "answer_key": AnswerKey,
+    "transcript": Transcript,
 }
 
 
@@ -41,6 +47,15 @@ def _owned_entity(session: Session, entity_type: str, entity_id: int, owner_id: 
         query = (select(model).join(Dialogue, model.dialogue_id == Dialogue.id)
                  .join(Lesson, Dialogue.lesson_id == Lesson.id).join(Textbook)
                  .where(model.id == entity_id, Textbook.owner_id == owner_id))
+    elif model is WordSense:
+        query = (select(model).join(Vocabulary).join(Lesson).join(Textbook)
+                 .where(model.id == entity_id, Textbook.owner_id == owner_id))
+    elif model in {ExerciseOption, AnswerKey}:
+        query = (select(model).join(Exercise).join(Lesson).join(Textbook)
+                 .where(model.id == entity_id, Textbook.owner_id == owner_id))
+    elif model is Transcript:
+        query = (select(model).join(ListeningTrack).join(Lesson).join(Textbook)
+                 .where(model.id == entity_id, Textbook.owner_id == owner_id))
     else:
         query = select(model).join(Lesson, model.lesson_id == Lesson.id).join(Textbook).where(
             model.id == entity_id, Textbook.owner_id == owner_id,
@@ -49,7 +64,7 @@ def _owned_entity(session: Session, entity_type: str, entity_id: int, owner_id: 
 
 
 def _preview(row) -> str:
-    for field in ("headword", "pattern", "text_ko", "text", "prompt", "title", "track_identifier"):
+    for field in ("headword", "meaning_vi", "answer_text", "pattern", "text_ko", "text", "prompt", "title", "track_identifier"):
         value = getattr(row, field, None)
         if value:
             return str(value)[:160]
@@ -64,26 +79,55 @@ def review_queue(
     offset: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
 ) -> list[ReviewRecordResponse]:
-    records: list[ReviewRecordResponse] = []
+    queries = []
     for entity_type, model in _DIRECT_MODELS.items():
+        preview_column = next(
+            (getattr(model, field) for field in (
+                "headword", "meaning_vi", "answer_text", "pattern", "text_ko", "text", "prompt", "title", "track_identifier",
+            ) if hasattr(model, field)),
+            literal(""),
+        )
+        source_span_column = (
+            model.source_span_id if hasattr(model, "source_span_id") else literal(None)
+        )
+        projection = select(
+            literal(entity_type).label("entity_type"),
+            model.id.label("entity_id"),
+            model.review_status.label("review_status"),
+            cast(func.coalesce(preview_column, ""), String).label("preview"),
+            model.version.label("version"),
+            source_span_column.label("source_span_id"),
+        )
         if model is DialogueTurn:
-            rows = session.scalars(select(model).join(Dialogue).join(Lesson).join(Textbook).where(
+            projection = projection.join(Dialogue).join(Lesson).join(Textbook).where(
                 Textbook.owner_id == owner_id, model.review_status == review_status,
-            )).all()
+            )
+        elif model is WordSense:
+            projection = projection.join(Vocabulary).join(Lesson).join(Textbook).where(
+                Textbook.owner_id == owner_id, model.review_status == review_status,
+            )
+        elif model in {ExerciseOption, AnswerKey}:
+            projection = projection.join(Exercise).join(Lesson).join(Textbook).where(
+                Textbook.owner_id == owner_id, model.review_status == review_status,
+            )
+        elif model is Transcript:
+            projection = projection.join(ListeningTrack).join(Lesson).join(Textbook).where(
+                Textbook.owner_id == owner_id, model.review_status == review_status,
+            )
         elif model is Lesson:
-            rows = session.scalars(select(model).join(Textbook).where(
+            projection = projection.join(Textbook).where(
                 Textbook.owner_id == owner_id, model.review_status == review_status,
-            )).all()
+            )
         else:
-            rows = session.scalars(select(model).join(Lesson).join(Textbook).where(
+            projection = projection.join(Lesson).join(Textbook).where(
                 Textbook.owner_id == owner_id, model.review_status == review_status,
-            )).all()
-        records.extend(ReviewRecordResponse(
-            entity_type=entity_type, entity_id=row.id,
-            review_status=row.review_status, preview=_preview(row),
-        ) for row in rows)
-    records.sort(key=lambda item: (item.entity_type, item.entity_id))
-    return records[offset:offset + limit]
+            )
+        queries.append(projection)
+    queue = union_all(*queries).subquery()
+    rows = session.execute(
+        select(queue).order_by(queue.c.entity_type, queue.c.entity_id).offset(offset).limit(limit)
+    ).mappings().all()
+    return [ReviewRecordResponse(**dict(row)) for row in rows]
 
 
 @router.post("/review/{entity_type}/{entity_id}", response_model=ReviewRecordResponse)
@@ -97,15 +141,47 @@ def update_review(
     row = _owned_entity(session, entity_type, entity_id, owner_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review record not found")
+    current_version = int(getattr(row, "version", 1))
+    source_span_id = payload.source_span_id or getattr(row, "source_span_id", None)
+    if payload.status == "approved":
+        if payload.expected_version is None or payload.expected_version != current_version:
+            raise HTTPException(status_code=409, detail="Record version changed; reload before approval")
+        if source_span_id is None:
+            raise HTTPException(status_code=422, detail="Approval requires a source reference")
+        if payload.reviewer_action not in {"compared_to_source", "corrected"}:
+            raise HTTPException(status_code=422, detail="Approval requires an explicit source comparison action")
+        required_checks = {"source_text", "source_position"}
+        if not required_checks.issubset(set(payload.checks)):
+            raise HTTPException(status_code=422, detail="Approval requires source_text and source_position checks")
+        owned_span = session.scalar(
+            select(SourceSpan.id)
+            .join(SourcePage, SourceSpan.source_page_id == SourcePage.id)
+            .join(SourceDocument, SourcePage.source_document_id == SourceDocument.id)
+            .where(SourceSpan.id == source_span_id, SourceDocument.owner_id == owner_id)
+        )
+        provenance = session.scalar(select(ContentProvenance.id).where(
+            ContentProvenance.entity_type == entity_type,
+            ContentProvenance.entity_id == entity_id,
+            ContentProvenance.source_span_id == source_span_id,
+        ))
+        if owned_span is None or provenance is None:
+            raise HTTPException(status_code=422, detail="Approval requires owner-scoped provenance")
+        direct_span = getattr(row, "source_span_id", None)
+        if direct_span is not None and direct_span != source_span_id:
+            raise HTTPException(status_code=422, detail="Source reference does not match the record")
     row.review_status = payload.status
+    row.version = current_version + 1
     session.add(ContentReview(
         entity_type=entity_type, entity_id=entity_id, status=payload.status,
         note=payload.note, reviewer_id=owner_id,
+        source_span_id=source_span_id, entity_version=current_version,
+        reviewer_action=payload.reviewer_action, checks=payload.checks,
     ))
     session.commit()
     return ReviewRecordResponse(
         entity_type=entity_type, entity_id=entity_id,
-        review_status=row.review_status, preview=_preview(row),
+        review_status=row.review_status, preview=_preview(row), version=row.version,
+        source_span_id=source_span_id,
     )
 
 
@@ -138,7 +214,7 @@ def dataset_export(
         fields = [
             "schema_version", "source_identifier", "extraction_version", "export_timestamp",
             "id", "lesson_id", "headword", "normalized_headword", "meanings_vi",
-            "review_status", "source_span_id",
+            "review_status", "source_span_id", "content_origin",
         ]
         writer = csv.DictWriter(stream, fieldnames=fields)
         writer.writeheader()

@@ -2,9 +2,9 @@ name: Korean knowledge data engine
 
 on:
   pull_request:
-    branches: [master, codex/task-03-structured-knowledge]
+    branches: [master, codex/task-03-structured-knowledge, codex/task-04-data-engine]
   push:
-    branches: [codex/task-03-structured-knowledge, codex/task-04-data-engine]
+    branches: [codex/task-03-structured-knowledge, codex/task-04-data-engine, codex/task-07-learning-website]
   workflow_dispatch:
 
 permissions:

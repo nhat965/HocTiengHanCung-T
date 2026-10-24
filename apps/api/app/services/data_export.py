@@ -49,8 +49,10 @@ def export_dataset(
                 "normalized_headword": row.normalized_headword,
                 "meanings_vi": list(session.scalars(select(WordSense.meaning_vi).where(
                     WordSense.vocabulary_id == row.id,
+                    WordSense.review_status == review_status,
                 )).all()),
                 "review_status": row.review_status, "source_span_id": row.source_span_id,
+                "content_origin": row.content_origin,
             })
     elif dataset == "grammar":
         rows = session.scalars(select(GrammarPattern).where(
@@ -62,6 +64,7 @@ def export_dataset(
             "usage_rules": row.usage_rules, "conjugation": row.conjugation,
             "notes": row.notes, "review_status": row.review_status,
             "source_span_id": row.source_span_id,
+            "content_origin": row.content_origin,
         } for row in rows]
     elif dataset == "sentences":
         rows = session.scalars(select(Sentence).where(
@@ -71,6 +74,7 @@ def export_dataset(
             "id": row.id, "identity_id": row.identity_id, "lesson_id": row.lesson_id, "text_ko": row.text_ko,
             "text_vi": row.text_vi, "review_status": row.review_status,
             "source_span_id": row.source_span_id,
+            "content_origin": row.content_origin,
             "vocabulary_ids": [item.id for item in row.vocabulary_items],
             "grammar_pattern_ids": [item.id for item in row.grammar_patterns],
         } for row in rows]
@@ -83,6 +87,7 @@ def export_dataset(
                 "turn_index": turn.turn_index, "speaker": turn.speaker,
                 "text_ko": turn.text, "text_vi": turn.text_vi,
                 "review_status": turn.review_status, "source_span_id": turn.source_span_id,
+                "content_origin": turn.content_origin,
             } for turn in session.scalars(select(DialogueTurn).where(
                 DialogueTurn.dialogue_id == row.id, DialogueTurn.review_status == review_status,
             ).order_by(DialogueTurn.turn_index)).all()],
@@ -94,7 +99,8 @@ def export_dataset(
         ).order_by(Passage.id)).all()
         records = [{"id": row.id, "lesson_id": row.lesson_id, "title": row.title,
                     "text": row.text, "review_status": row.review_status,
-                    "source_span_id": row.source_span_id} for row in rows]
+                    "source_span_id": row.source_span_id,
+                    "content_origin": row.content_origin} for row in rows]
     elif dataset == "exercises":
         rows = session.scalars(select(Exercise).where(
             Exercise.lesson_id.in_(lesson_ids), Exercise.review_status == review_status,
@@ -104,10 +110,13 @@ def export_dataset(
             "group_identifier": row.group_identifier, "parent_exercise_id": row.parent_exercise_id,
             "prompt": row.prompt, "options": list(session.scalars(select(ExerciseOption.text).where(
                 ExerciseOption.exercise_id == row.id,
+                ExerciseOption.review_status == review_status,
             ).order_by(ExerciseOption.option_index)).all()),
             "answers": list(session.scalars(select(AnswerKey.answer_text).where(
                 AnswerKey.exercise_id == row.id,
+                AnswerKey.review_status == review_status,
             )).all()), "review_status": row.review_status, "source_span_id": row.source_span_id,
+            "content_origin": row.content_origin,
         } for row in rows]
     else:
         rows = session.scalars(select(ListeningTrack).where(
@@ -120,7 +129,9 @@ def export_dataset(
             "source_span_id": row.source_span_id,
             "transcripts": list(session.scalars(select(Transcript.text).where(
                 Transcript.listening_track_id == row.id,
+                Transcript.review_status == review_status,
             )).all()),
+            "content_origin": row.content_origin,
         } for row in rows]
     metadata = _meta(textbook, dataset, review_status)
     metadata["record_count"] = len(records)

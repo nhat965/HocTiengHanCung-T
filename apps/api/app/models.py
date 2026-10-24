@@ -1,7 +1,7 @@
 from datetime import datetime
 from enum import Enum
 
-from sqlalchemy import DateTime, Enum as SqlEnum, ForeignKey, Integer, Table, UniqueConstraint, Column
+from sqlalchemy import BigInteger, DateTime, Enum as SqlEnum, ForeignKey, Integer, Table, UniqueConstraint, Column
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -56,6 +56,10 @@ class SourceDocument(Base):
     filename: Mapped[str] = mapped_column(String(512))
     sha256: Mapped[str] = mapped_column(String(64))
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    inventory_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     source_path: Mapped[str] = mapped_column(Text)
     rights_status: Mapped[str] = mapped_column(String(32), default="unverified")
     rights_note: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -175,6 +179,7 @@ class Vocabulary(Base):
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class WordSense(Base):
@@ -185,6 +190,7 @@ class WordSense(Base):
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class GrammarPattern(Base):
@@ -206,6 +212,7 @@ class GrammarPattern(Base):
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class SentenceIdentity(Base):
@@ -230,6 +237,7 @@ class Sentence(Base):
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
     vocabulary_items: Mapped[list["Vocabulary"]] = relationship(secondary=sentence_vocabulary)
     grammar_patterns: Mapped[list["GrammarPattern"]] = relationship(secondary=sentence_grammar_patterns)
     identity: Mapped["SentenceIdentity | None"] = relationship()
@@ -245,6 +253,7 @@ class Passage(Base):
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class Dialogue(Base):
@@ -257,6 +266,7 @@ class Dialogue(Base):
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
     group_identifier: Mapped[str | None] = mapped_column(String(128), nullable=True)
     topic: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class DialogueTurn(Base):
@@ -273,6 +283,7 @@ class DialogueTurn(Base):
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class Exercise(Base):
@@ -289,6 +300,7 @@ class Exercise(Base):
     listening_track_id: Mapped[int | None] = mapped_column(ForeignKey("listening_tracks.id"), nullable=True)
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class ExerciseOption(Base):
@@ -302,6 +314,8 @@ class ExerciseOption(Base):
     text: Mapped[str] = mapped_column(Text)
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class ListeningTrack(Base):
@@ -318,6 +332,7 @@ class ListeningTrack(Base):
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class Transcript(Base):
@@ -328,6 +343,7 @@ class Transcript(Base):
     source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class AnswerKey(Base):
@@ -339,6 +355,7 @@ class AnswerKey(Base):
     answer_index: Mapped[str | None] = mapped_column(String(64), nullable=True)
     review_status: Mapped[str] = mapped_column(String(32), default="pending")
     version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
 class ContentReview(Base):
@@ -349,6 +366,11 @@ class ContentReview(Base):
     status: Mapped[str] = mapped_column(String(32))
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
     reviewer_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True)
+    entity_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reviewer_action: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checks: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class ContentProvenance(Base):
@@ -365,3 +387,54 @@ class ContentProvenance(Base):
     source_span_id: Mapped[int] = mapped_column(ForeignKey("source_spans.id"), index=True)
     extraction_method: Mapped[str] = mapped_column(String(64))
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
+
+
+class VocabularyProgress(Base):
+    __tablename__ = "vocabulary_progress"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "vocabulary_id", name="uq_vocabulary_progress_owner_item"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), index=True)
+    vocabulary_id: Mapped[int] = mapped_column(ForeignKey("vocabulary.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="new")
+    repetitions: Mapped[int] = mapped_column(Integer, default=0)
+    interval_days: Mapped[int] = mapped_column(Integer, default=0)
+    next_review_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class StudyAttempt(Base):
+    __tablename__ = "study_attempts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), index=True)
+    vocabulary_id: Mapped[int | None] = mapped_column(ForeignKey("vocabulary.id"), nullable=True, index=True)
+    exercise_id: Mapped[int | None] = mapped_column(ForeignKey("exercises.id"), nullable=True, index=True)
+    response: Mapped[str] = mapped_column(Text)
+    correct: Mapped[bool | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class LessonProgress(Base):
+    __tablename__ = "lesson_progress"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "lesson_id", name="uq_lesson_progress_owner_lesson"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), index=True)
+    lesson_id: Mapped[int] = mapped_column(ForeignKey("lessons.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="not_started")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_opened_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class GrammarNote(Base):
+    __tablename__ = "grammar_notes"
+    __table_args__ = (
+        UniqueConstraint("owner_id", "grammar_pattern_id", name="uq_grammar_notes_owner_pattern"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), index=True)
+    grammar_pattern_id: Mapped[int] = mapped_column(ForeignKey("grammar_patterns.id"), index=True)
+    note: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
