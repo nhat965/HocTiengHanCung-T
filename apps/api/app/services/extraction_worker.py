@@ -4,13 +4,15 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 import logging
 from pathlib import Path
+import threading
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app import database
 from app.models import ImportJob, ImportState, SourceBlock, SourceDocument, SourcePage, SourceSpan
 from app.services.knowledge.persistence import persist_bundle
 from app.services.knowledge.pipeline import extract_knowledge
@@ -22,10 +24,100 @@ from app.services.segmentation import normalize_text
 logger = logging.getLogger(__name__)
 STALE_JOB_TIMEOUT = timedelta(minutes=60)
 WORKER_LEASE_DURATION = timedelta(minutes=60)
+WORKER_HEARTBEAT_INTERVAL = timedelta(minutes=20)
 
 
 class WorkerLeaseLost(RuntimeError):
     """Raised when a worker tries to write after its import lease expired."""
+
+
+class LeaseHeartbeat:
+    """Renew one import lease from a connection independent of worker writes.
+
+    The worker deliberately fails closed when the renewal cannot be confirmed.
+    A heartbeat never updates an expired lease: the ``lease_expires_at > now``
+    predicate fences workers that have already been recovered by another worker.
+    """
+
+    def __init__(
+        self,
+        job_id: int,
+        worker_token: str,
+        *,
+        session_factory=None,
+        interval: timedelta | None = None,
+    ) -> None:
+        self.job_id = job_id
+        self.worker_token = worker_token
+        self.session_factory = session_factory or database.SessionLocal
+        self.interval = interval or WORKER_HEARTBEAT_INTERVAL
+        self._stop = threading.Event()
+        self._lost = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._error: Exception | None = None
+
+    @property
+    def lost(self) -> bool:
+        return self._lost.is_set()
+
+    @property
+    def error(self) -> Exception | None:
+        return self._error
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._thread = threading.Thread(
+            target=self._run,
+            name=f"pdf-lease-heartbeat-{self.job_id}",
+            daemon=True,
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=max(self.interval.total_seconds() * 2, 1.0))
+        self._thread = None
+
+    def assert_healthy(self) -> None:
+        if self.lost:
+            detail = type(self.error).__name__ if self.error is not None else "lease ownership changed"
+            raise WorkerLeaseLost(f"Worker lease heartbeat failed for import job {self.job_id} ({detail})")
+
+    def _run(self) -> None:
+        interval_seconds = max(self.interval.total_seconds(), 0.01)
+        while not self._stop.wait(interval_seconds):
+            try:
+                self._renew()
+            except Exception as error:  # fail closed for DB outages and ownership changes
+                self._error = error
+                self._lost.set()
+                logger.warning(
+                    "Import job %s lease heartbeat stopped (%s)",
+                    self.job_id,
+                    type(error).__name__,
+                )
+                return
+
+    def _renew(self) -> None:
+        now = datetime.utcnow()
+        with self.session_factory() as session:
+            result = session.execute(
+                update(ImportJob)
+                .where(
+                    ImportJob.id == self.job_id,
+                    ImportJob.state == ImportState.extracting,
+                    ImportJob.worker_token == self.worker_token,
+                    ImportJob.lease_expires_at.is_not(None),
+                    ImportJob.lease_expires_at > now,
+                )
+                .values(lease_expires_at=now + WORKER_LEASE_DURATION)
+            )
+            if result.rowcount != 1:
+                session.rollback()
+                raise WorkerLeaseLost(f"Worker lease lost for import job {self.job_id}")
+            session.commit()
 
 
 def queue_job(session: Session, job: ImportJob) -> ImportJob:
@@ -324,13 +416,17 @@ def _process_claimed_job(session: Session, job: ImportJob, worker_token: str) ->
         page_range = range(start, end + 1)
     total_pages = document.page_count or end
     stage = "raw_extraction"
+    heartbeat = LeaseHeartbeat(job_id, worker_token)
+    heartbeat.start()
     try:
+        heartbeat.assert_healthy()
         _set_stage(session, job_id, "raw_extraction", "Extracting raw PDF pages.", worker_token)
         if sha256_file(source_path) != checksum:
             raise PdfValidationError("Source checksum does not match registration")
         # Range belongs to this import job. Fall back to the old document
         # fields only for jobs created before the range migration.
         pages = extract_pages(source_path, page_range)
+        heartbeat.assert_healthy()
         raw = _raw_document(source_document, pages)
         raw_inventory = {
             "scope": {
@@ -347,21 +443,26 @@ def _process_claimed_job(session: Session, job: ImportJob, worker_token: str) ->
             "table_count": sum(len(page.tables) for page in pages),
         }
         session.rollback()
+        heartbeat.assert_healthy()
         with session.begin():
             _owned_job(session, job_id, worker_token, lock=True)
             _lock_source_document(session, document_id).inventory_metadata = raw_inventory
 
         stage = "raw_persistence"
+        heartbeat.assert_healthy()
         _set_stage(session, job_id, stage, "Persisting raw pages, blocks, and table rows.", worker_token)
         with session.begin():
+            heartbeat.assert_healthy()
             _owned_job(session, job_id, worker_token, lock=True)
             _lock_source_document(session, document_id)
             _persist_raw_pages(session, document_id, textbook_id, pages)
 
         stage = "structured_extraction"
+        heartbeat.assert_healthy()
         _set_stage(session, job_id, stage, "Extracting structured knowledge from persisted source pages.", worker_token)
         bundle = extract_knowledge(raw)
         session.rollback()
+        heartbeat.assert_healthy()
         with session.begin():
             _owned_job(session, job_id, worker_token, lock=True)
             document = _lock_source_document(session, document_id)
@@ -382,6 +483,7 @@ def _process_claimed_job(session: Session, job: ImportJob, worker_token: str) ->
             document.inventory_metadata = inventory
 
         stage = "validation"
+        heartbeat.assert_healthy()
         _set_stage(session, job_id, stage, "Validating source references and structured relationships.", worker_token)
         invalid_pages = [
             warning for warning in bundle.warnings
@@ -391,9 +493,11 @@ def _process_claimed_job(session: Session, job: ImportJob, worker_token: str) ->
             raise ValueError("Structured records reference pages missing from the extraction")
 
         stage = "structured_persistence"
+        heartbeat.assert_healthy()
         _set_stage(session, job_id, stage, "Persisting structured records and provenance.", worker_token)
         session.rollback()
         with session.begin():
+            heartbeat.assert_healthy()
             _owned_job(session, job_id, worker_token, lock=True)
             _lock_source_document(session, document_id)
             counts = persist_bundle(
@@ -404,6 +508,7 @@ def _process_claimed_job(session: Session, job: ImportJob, worker_token: str) ->
             )
 
         stage = "quality_report"
+        heartbeat.assert_healthy()
         _set_stage(session, job_id, stage, "Building coverage and review quality report.", worker_token)
         summary = report_dict(
             bundle,
@@ -416,6 +521,7 @@ def _process_claimed_job(session: Session, job: ImportJob, worker_token: str) ->
             "nul_replacements": sum(page.sanitized_nul_count for page in pages),
         }
         with session.begin():
+            heartbeat.assert_healthy()
             job = _owned_job(session, job_id, worker_token, lock=True)
             job.state = ImportState.needs_review
             job.stage = "complete"
@@ -434,6 +540,8 @@ def _process_claimed_job(session: Session, job: ImportJob, worker_token: str) ->
         return session.get(ImportJob, job_id)
     except (RuntimeError, OSError, ValueError, KeyError, TypeError, SQLAlchemyError) as error:
         return _fail(session, job_id, stage, "Extraction stage failed; retry is available if attempts remain.", error, worker_token)
+    finally:
+        heartbeat.stop()
     return session.get(ImportJob, job_id)
 
 

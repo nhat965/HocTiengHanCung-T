@@ -602,6 +602,169 @@ def test_expired_worker_lease_cannot_commit_after_recovery(client, tmp_path: Pat
         assert retried is not None and retried.state == ImportState.needs_review
 
 
+@pytest.mark.skipif(
+    "postgresql" not in os.environ.get("TEST_DATABASE_URL", ""),
+    reason="PostgreSQL lease evidence is required for heartbeat tests",
+)
+def test_long_running_worker_heartbeat_prevents_false_recovery(client, tmp_path: Path, monkeypatch):
+    """A live parser keeps its lease while stale recovery runs in another session."""
+    from datetime import datetime, timedelta
+
+    monkeypatch.setattr(extraction_worker, "WORKER_LEASE_DURATION", timedelta(milliseconds=250))
+    monkeypatch.setattr(extraction_worker, "WORKER_HEARTBEAT_INTERVAL", timedelta(milliseconds=40))
+
+    source = tmp_path / "long-running-heartbeat.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "long running heartbeat fixture")
+    pdf.save(source)
+    pdf.close()
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(source), "title": "Heartbeat", "level": "beginner",
+        "volume_number": 5, "rights_status": "authorized",
+    }).json()
+    assert client.post(f"/api/v1/imports/{registered['job_id']}/queue").status_code == 200
+
+    original_extract = extraction_worker.extract_knowledge
+    entered = threading.Event()
+    release = threading.Event()
+
+    def pause_during_parse(raw):
+        entered.set()
+        assert release.wait(timeout=10)
+        return original_extract(raw)
+
+    monkeypatch.setattr(extraction_worker, "extract_knowledge", pause_during_parse)
+    result_holder: dict[str, object] = {}
+
+    def worker() -> None:
+        with database.SessionLocal() as session:
+            result_holder["result"] = run_job(session, session.get(ImportJob, registered["job_id"]))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert entered.wait(timeout=10)
+
+    lease_extended = False
+    for _ in range(100):
+        with database.SessionLocal() as session:
+            live = session.get(ImportJob, registered["job_id"])
+            if live and live.lease_expires_at and live.lease_expires_at > datetime.utcnow() + timedelta(milliseconds=100):
+                lease_extended = True
+                break
+        threading.Event().wait(0.02)
+    assert lease_extended, "heartbeat did not extend the active lease"
+
+    with database.SessionLocal() as session:
+        assert recover_stale_jobs(session, now=datetime.utcnow()) == 0
+        assert session.get(ImportJob, registered["job_id"]).state == ImportState.extracting
+
+    release.set()
+    thread.join(timeout=20)
+    assert not thread.is_alive()
+    assert result_holder["result"].state == ImportState.needs_review
+
+
+def test_heartbeat_stops_after_completion(client, tmp_path: Path, monkeypatch):
+    from datetime import timedelta
+
+    monkeypatch.setattr(extraction_worker, "WORKER_LEASE_DURATION", timedelta(milliseconds=250))
+    monkeypatch.setattr(extraction_worker, "WORKER_HEARTBEAT_INTERVAL", timedelta(milliseconds=40))
+    stopped = threading.Event()
+    original_stop = extraction_worker.LeaseHeartbeat.stop
+
+    def recording_stop(heartbeat):
+        stopped.set()
+        return original_stop(heartbeat)
+
+    monkeypatch.setattr(extraction_worker.LeaseHeartbeat, "stop", recording_stop)
+    source = tmp_path / "heartbeat-stop.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "heartbeat stop fixture")
+    pdf.save(source)
+    pdf.close()
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(source), "title": "Heartbeat stop", "level": "beginner",
+        "volume_number": 6, "rights_status": "authorized",
+    }).json()
+    assert client.post(f"/api/v1/imports/{registered['job_id']}/queue").status_code == 200
+
+    with database.SessionLocal() as session:
+        result = run_next_job(session)
+        assert result is not None and result.state == ImportState.needs_review
+    assert stopped.wait(timeout=5)
+    with database.SessionLocal() as session:
+        completed = session.get(ImportJob, registered["job_id"])
+        assert completed.worker_token is None
+        assert completed.lease_expires_at is None
+
+
+def test_heartbeat_failure_fails_closed_before_persistence(client, tmp_path: Path, monkeypatch):
+    """A renewal outage must stop the worker before it writes extracted pages."""
+    from datetime import timedelta
+
+    monkeypatch.setattr(extraction_worker, "WORKER_LEASE_DURATION", timedelta(seconds=2))
+    monkeypatch.setattr(extraction_worker, "WORKER_HEARTBEAT_INTERVAL", timedelta(milliseconds=40))
+    heartbeat_failed = threading.Event()
+    heartbeat_stopped = threading.Event()
+    original_stop = extraction_worker.LeaseHeartbeat.stop
+
+    def fail_renewal(_heartbeat):
+        heartbeat_failed.set()
+        raise ConnectionError("database unavailable")
+
+    monkeypatch.setattr(extraction_worker.LeaseHeartbeat, "_renew", fail_renewal)
+
+    def recording_stop(heartbeat):
+        heartbeat_stopped.set()
+        return original_stop(heartbeat)
+
+    monkeypatch.setattr(extraction_worker.LeaseHeartbeat, "stop", recording_stop)
+    source = tmp_path / "heartbeat-failure.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "heartbeat failure fixture")
+    pdf.save(source)
+    pdf.close()
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(source), "title": "Heartbeat failure", "level": "beginner",
+        "volume_number": 7, "rights_status": "authorized",
+    }).json()
+    assert client.post(f"/api/v1/imports/{registered['job_id']}/queue").status_code == 200
+
+    original_extract_pages = extraction_worker.extract_pages
+    entered = threading.Event()
+    release = threading.Event()
+
+    def pause_after_pdf_parse(path, page_range):
+        pages = original_extract_pages(path, page_range)
+        entered.set()
+        assert release.wait(timeout=10)
+        return pages
+
+    monkeypatch.setattr(extraction_worker, "extract_pages", pause_after_pdf_parse)
+    result_holder: dict[str, object] = {}
+
+    def worker() -> None:
+        with database.SessionLocal() as session:
+            result_holder["result"] = run_job(session, session.get(ImportJob, registered["job_id"]))
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert entered.wait(timeout=10)
+    assert heartbeat_failed.wait(timeout=10)
+    release.set()
+    thread.join(timeout=20)
+    assert not thread.is_alive()
+    assert heartbeat_stopped.is_set()
+
+    with database.SessionLocal() as session:
+        result = session.get(ImportJob, registered["job_id"])
+        assert result.state == ImportState.extracting
+        assert session.scalar(select(func.count(SourcePage.id))) == 0
+
+
 def test_reimport_is_idempotent_and_preserves_reviewed_records(client, tmp_path: Path):
     pdf_path = tmp_path / "worker-source.pdf"
     pdf = fitz.open()
