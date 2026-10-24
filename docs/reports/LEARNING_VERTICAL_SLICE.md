@@ -4,7 +4,7 @@
 
 - Branch: `codex/task-07-learning-website`
 - Base: `codex/task-04-data-engine` at `22da8b4`
-- Implementation commit: `0d0e9d9` (PostgreSQL CI pending).
+- Implementation commit: `0d0e9d9`; report/branch update: `92cd3af`.
 - Source books: six local PDFs were inventoried by metadata only. Their processing and redistribution rights are not established, so none was extracted or imported.
 - Test source: generated one-page PDF fixture with synthetic Korean/Vietnamese content. It is not textbook data.
 
@@ -69,16 +69,19 @@ coverage, correctness, or permission.
   then completed the browser journey: book → lesson → Vietnamese flashcard →
   learned state → grammar note → multiple-choice submission → lesson complete
   → reload with progress retained.
-- PostgreSQL 16: not run locally because Docker is unavailable. The PR CI job
-  runs PostgreSQL migrations and the full API suite; its result is required
-  before considering this branch merge-ready.
+- PostgreSQL 16 CI: migration upgrade → downgrade to base → upgrade to head
+  passed; API/integration suite **26 passed, 1 skipped, 6 warnings**.
+- PR CI run [40073698597](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40073698597)
+  passed on branch commit `92cd3afd6a723847c26a980685bce9006424998a`.
+  Both `api-postgres` and `web-build` passed; the latter includes the
+  production dependency audit and frontend production build. Docker remains
+  unavailable for a local PostgreSQL run.
 
 ## Remaining limitations
 
 - No real textbook content was extracted or imported. Rights and content
   accuracy remain unverified.
-- PostgreSQL execution for the new migrations and end-to-end journey is pending
-  CI.
+- PostgreSQL 16 was validated in GitHub Actions only, not locally.
 - The web login is one shared personal password, with one configured owner;
   there are no individual accounts or per-user sessions.
 - Exercise formats beyond the currently extracted multiple-choice and
