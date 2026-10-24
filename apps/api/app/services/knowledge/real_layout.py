@@ -29,7 +29,7 @@ _TRACK = re.compile(r"\bCD\s*(\d+)\s*TRACK\s*(\d+)\b", re.I)
 _GROUP_OR_QUESTION = re.compile(r"^\s*(?P<number>\d{1,2})[.)]?\s+(?P<text>.+)$", re.S)
 _CHILD = re.compile(r"^\s*[\(\[](?P<number>\d{1,2})[\)\]]\s*(?P<text>.+)$", re.S)
 _OPTION = re.compile(
-    r"^\s*(?:OPTION\s*[:：]\s*|(?:\((?P<paren>[A-Da-d1-9]|[①②③④⑤⑥⑦⑧⑨⑩]|[ⓐⓑⓒⓓ])\)|"
+    r"^\s*(?:OPTION\s*[:：]\s*|(?:\((?P<paren>[A-Da-d]|[①②③④⑤⑥⑦⑧⑨⑩]|[ⓐⓑⓒⓓ])\)|"
     r"(?P<bare>[A-Da-d]|[①②③④⑤⑥⑦⑧⑨⑩]|[ⓐⓑⓒⓓ])[.)。：：]?\s+))(?P<text>.+)$",
     re.I,
 )

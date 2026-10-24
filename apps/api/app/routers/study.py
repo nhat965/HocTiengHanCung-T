@@ -269,21 +269,34 @@ def submit_exercise_attempt(
     )
     if exercise is None:
         raise HTTPException(status_code=404, detail="Approved exercise not found")
+    all_options = []
     approved_options = []
     if exercise.exercise_type in {"multiple_choice", "single_choice"}:
-        approved_options = list(session.scalars(select(ExerciseOption).where(
+        all_options = list(session.scalars(select(ExerciseOption).where(
             ExerciseOption.exercise_id == exercise.id,
-            ExerciseOption.review_status == "approved",
         ).order_by(ExerciseOption.option_index)).all())
-        if len(approved_options) < 2:
+        if len(all_options) < 2:
             raise HTTPException(
                 status_code=409,
                 detail="Multiple-choice exercise is incomplete and needs review",
             )
+        approved_options = list(session.scalars(select(ExerciseOption).where(
+            ExerciseOption.exercise_id == exercise.id,
+            ExerciseOption.review_status == "approved",
+        ).order_by(ExerciseOption.option_index)).all())
     answer_key = session.scalar(select(AnswerKey).where(
         AnswerKey.exercise_id == exercise.id,
         AnswerKey.review_status == "approved",
     ).order_by(AnswerKey.id))
+    if (
+        answer_key is not None
+        and exercise.exercise_type in {"multiple_choice", "single_choice"}
+        and len(approved_options) < 2
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Multiple-choice options must be approved before grading",
+        )
     correct: bool | None = None
     revealed: str | None = None
     if answer_key is not None:

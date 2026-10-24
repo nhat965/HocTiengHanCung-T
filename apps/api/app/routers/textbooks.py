@@ -275,7 +275,12 @@ def lesson_exercises(
         # An approved multiple-choice row without a complete option set is not
         # learner-ready. Keep it visible to review callers, but never publish it
         # through the approved learner feed.
-        if review_status == "approved" and item.exercise_type == "multiple_choice" and len(options) < 2:
+        if (
+            review_status == "approved"
+            and item.parent_exercise_id is not None
+            and item.exercise_type == "multiple_choice"
+            and len(options) < 2
+        ):
             continue
         result.append(ExerciseResponse(
             id=item.id,
