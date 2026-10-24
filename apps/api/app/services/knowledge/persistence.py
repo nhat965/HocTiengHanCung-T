@@ -133,11 +133,18 @@ def persist_bundle(
                 session.flush()
                 counts["lessons"] += 1
             elif row.review_status not in {"approved", "reviewed"}:
-                row.title = item.title_ko
-                row.end_pdf_page = item.end_pdf_page
-                row.segmentation_method = item.extraction_method
-                row.extraction_version = item.extraction_version
-                row.version += 1
+                changed = any((
+                    row.title != item.title_ko,
+                    row.end_pdf_page != item.end_pdf_page,
+                    row.segmentation_method != item.extraction_method,
+                    row.extraction_version != item.extraction_version,
+                ))
+                if changed:
+                    row.title = item.title_ko
+                    row.end_pdf_page = item.end_pdf_page
+                    row.segmentation_method = item.extraction_method
+                    row.extraction_version = item.extraction_version
+                    row.version += 1
             lesson_ids[(item.ordinal, item.start_pdf_page)] = row.id
             _provenance(session, "lesson", row.id, span_id, item.extraction_method, item.extraction_version)
 
@@ -378,15 +385,16 @@ def persist_bundle(
                 continue
             parent_id = exercise_ids.get(item.parent_id) if item.parent_id else None
             passage_id = passage_ids.get(item.passage_id) if item.passage_id else None
+            prompt = item.prompt or item.instruction or item.local_id
             row = session.scalar(select(Exercise).where(
                 Exercise.lesson_id == lesson_id,
                 Exercise.group_identifier == item.group_id,
-                Exercise.prompt == item.prompt,
+                Exercise.prompt == prompt,
                 Exercise.parent_exercise_id == parent_id,
             )) if lesson_id is not None else None
             if row is None and lesson_id is not None:
                 row = Exercise(
-                    lesson_id=lesson_id, prompt=item.prompt or item.instruction or item.local_id,
+                    lesson_id=lesson_id, prompt=prompt,
                     source_span_id=span_id, review_status=item.review_status,
                     exercise_type=item.exercise_type, group_identifier=item.group_id,
                     parent_exercise_id=parent_id, passage_id=passage_id,

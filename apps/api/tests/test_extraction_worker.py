@@ -544,3 +544,189 @@ def test_reimport_is_idempotent_and_preserves_reviewed_records(client, tmp_path:
         assert result.failure_stage == "raw_extraction"
         assert "validation failed" in result.message
         assert session.get(SourceSpan, reviewed_span.id).review_status == "approved"
+
+
+def test_reimport_preserves_approved_knowledge_and_learning_state(client, tmp_path: Path):
+    """A full re-extraction must preserve reviewed content and learner state."""
+    from app.models import ContentReview
+
+    def snapshot(row):
+        return {
+            key: value
+            for key, value in row.__dict__.items()
+            if not key.startswith("_")
+        }
+
+    fixture = tmp_path / "preservation-fixture.pdf"
+    _write_structured_fixture(fixture)
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(fixture),
+        "title": "Preservation fixture",
+        "level": "intermediate",
+        "volume_number": 4,
+        "rights_status": "authorized",
+    })
+    assert registered.status_code == 202
+    document_id = registered.json()["source_document_id"]
+    job_id = registered.json()["job_id"]
+    assert client.post(f"/api/v1/imports/{job_id}/queue").status_code == 200
+    with database.SessionLocal() as session:
+        result = run_next_job(session)
+        assert result is not None and result.state == ImportState.needs_review
+        lesson_id = session.scalar(select(Lesson.id))
+        vocabulary = session.scalar(select(Vocabulary).order_by(Vocabulary.id))
+        sense = session.scalar(select(WordSense).where(WordSense.vocabulary_id == vocabulary.id))
+        grammar = session.scalar(select(GrammarPattern).order_by(GrammarPattern.id))
+        exercise = session.scalar(select(Exercise).order_by(Exercise.id.desc()))
+        assert lesson_id and vocabulary and sense and grammar and exercise
+        record_ids = {
+            "lesson": lesson_id,
+            "vocabulary": vocabulary.id,
+            "sense": sense.id,
+            "grammar": grammar.id,
+            "exercise": exercise.id,
+        }
+        provenance = {
+            key: session.scalar(select(ContentProvenance.source_span_id).where(
+                ContentProvenance.entity_type == entity_type,
+                ContentProvenance.entity_id == entity_id,
+            ).order_by(ContentProvenance.id))
+            for key, entity_type, entity_id in (
+                ("vocabulary", "vocabulary", vocabulary.id),
+                ("sense", "word_sense", sense.id),
+                ("grammar", "grammar", grammar.id),
+                ("exercise", "exercise", exercise.id),
+            )
+        }
+        assert all(provenance.values())
+
+    for entity_type in ("vocabulary", "word_sense", "grammar", "exercise"):
+        entity_key = "sense" if entity_type == "word_sense" else entity_type
+        with database.SessionLocal() as session:
+            model = {
+                "vocabulary": Vocabulary,
+                "word_sense": WordSense,
+                "grammar": GrammarPattern,
+                "exercise": Exercise,
+            }[entity_type]
+            record = session.get(model, record_ids[entity_key])
+            version = record.version
+        response = client.post(f"/api/v1/review/{entity_type}/{record.id}", json={
+            "status": "approved",
+            "expected_version": version,
+            "source_span_id": provenance[entity_key],
+            "reviewer_action": "compared_to_source",
+            "checks": ["source_text", "source_position"],
+        })
+        assert response.status_code == 200, response.text
+
+    with database.SessionLocal() as session:
+        sense = session.get(WordSense, record_ids["sense"])
+        sense.meaning_vi = "nghĩa đã sửa thủ công"
+        session.commit()
+
+    assert client.post(
+        f"/api/v1/study/grammar/{record_ids['grammar']}/note",
+        json={"note": "Ghi chú cá nhân cần giữ nguyên"},
+    ).status_code == 200
+    assert client.post(f"/api/v1/study/vocabulary/{record_ids['vocabulary']}/learned").status_code == 200
+    assert client.post(f"/api/v1/study/lessons/{record_ids['lesson']}/complete").status_code == 200
+
+    with database.SessionLocal() as session:
+        option = session.scalar(select(ExerciseOption).where(
+            ExerciseOption.exercise_id == record_ids["exercise"],
+        ).order_by(ExerciseOption.option_index))
+        assert option is not None
+        option_id = option.id
+    attempt = client.post(
+        f"/api/v1/study/exercises/{record_ids['exercise']}/attempt",
+        json={"answer": "A"},
+    )
+    assert attempt.status_code == 200, attempt.text
+
+    with database.SessionLocal() as session:
+        before = {
+            "vocabulary": snapshot(session.get(Vocabulary, record_ids["vocabulary"])),
+            "sense": snapshot(session.get(WordSense, record_ids["sense"])),
+            "grammar": snapshot(session.get(GrammarPattern, record_ids["grammar"])),
+            "lesson": snapshot(session.get(Lesson, record_ids["lesson"])),
+            "exercise": snapshot(session.get(Exercise, record_ids["exercise"])),
+            "progress": snapshot(session.scalar(select(VocabularyProgress).where(
+                VocabularyProgress.vocabulary_id == record_ids["vocabulary"],
+            ))),
+            "lesson_progress": snapshot(session.scalar(select(LessonProgress).where(
+                LessonProgress.lesson_id == record_ids["lesson"],
+            ))),
+            "note": snapshot(session.scalar(select(GrammarNote).where(
+                GrammarNote.grammar_pattern_id == record_ids["grammar"],
+            ))),
+            "attempts": [snapshot(row) for row in session.scalars(select(StudyAttempt).order_by(StudyAttempt.id)).all()],
+            "reviews": session.scalar(select(func.count(ContentReview.id))),
+            "provenance": {
+                key: session.scalar(select(ContentProvenance.source_span_id).where(
+                    ContentProvenance.entity_type == entity_type,
+                    ContentProvenance.entity_id == entity_id,
+                ).order_by(ContentProvenance.id))
+                for key, entity_type, entity_id in (
+                    ("vocabulary", "vocabulary", record_ids["vocabulary"]),
+                    ("sense", "word_sense", record_ids["sense"]),
+                    ("grammar", "grammar", record_ids["grammar"]),
+                    ("exercise", "exercise", record_ids["exercise"]),
+                )
+            },
+            "option_id": option_id,
+        }
+        job = session.get(ImportJob, job_id)
+        job.state = ImportState.queued
+        session.commit()
+        rerun = run_job(session, job)
+        assert rerun.state == ImportState.needs_review
+
+    with database.SessionLocal() as session:
+        after = {
+            "vocabulary": snapshot(session.get(Vocabulary, record_ids["vocabulary"])),
+            "sense": snapshot(session.get(WordSense, record_ids["sense"])),
+            "grammar": snapshot(session.get(GrammarPattern, record_ids["grammar"])),
+            "lesson": snapshot(session.get(Lesson, record_ids["lesson"])),
+            "exercise": snapshot(session.get(Exercise, record_ids["exercise"])),
+            "progress": snapshot(session.scalar(select(VocabularyProgress).where(
+                VocabularyProgress.vocabulary_id == record_ids["vocabulary"],
+            ))),
+            "lesson_progress": snapshot(session.scalar(select(LessonProgress).where(
+                LessonProgress.lesson_id == record_ids["lesson"],
+            ))),
+            "note": snapshot(session.scalar(select(GrammarNote).where(
+                GrammarNote.grammar_pattern_id == record_ids["grammar"],
+            ))),
+            "attempts": [snapshot(row) for row in session.scalars(select(StudyAttempt).order_by(StudyAttempt.id)).all()],
+            "reviews": session.scalar(select(func.count(ContentReview.id))),
+            "provenance": {
+                key: session.scalar(select(ContentProvenance.source_span_id).where(
+                    ContentProvenance.entity_type == entity_type,
+                    ContentProvenance.entity_id == entity_id,
+                ).order_by(ContentProvenance.id))
+                for key, entity_type, entity_id in (
+                    ("vocabulary", "vocabulary", record_ids["vocabulary"]),
+                    ("sense", "word_sense", record_ids["sense"]),
+                    ("grammar", "grammar", record_ids["grammar"]),
+                    ("exercise", "exercise", record_ids["exercise"]),
+                )
+            },
+        }
+        for key in ("vocabulary", "sense", "grammar", "lesson", "exercise"):
+            for field in ("id", "review_status", "version"):
+                    assert after[key][field] == before[key][field], f"{key}.{field}: {before[key][field]} -> {after[key][field]}"
+        assert after["sense"]["meaning_vi"] == before["sense"]["meaning_vi"]
+        assert after["progress"] == before["progress"]
+        assert after["lesson_progress"] == before["lesson_progress"]
+        assert after["note"] == before["note"]
+        assert after["attempts"] == before["attempts"]
+        assert after["reviews"] == before["reviews"]
+        assert after["provenance"] == before["provenance"]
+        assert session.scalar(select(func.count(Vocabulary.id))) == 2
+        assert session.scalar(select(func.count(GrammarPattern.id))) == 1
+        assert session.scalar(select(func.count(Exercise.id))) == 2, [
+            (row.id, row.group_identifier, row.prompt, row.parent_exercise_id)
+            for row in session.scalars(select(Exercise).order_by(Exercise.id)).all()
+        ]
+        assert session.scalar(select(func.count(ExerciseOption.id))) == 2
