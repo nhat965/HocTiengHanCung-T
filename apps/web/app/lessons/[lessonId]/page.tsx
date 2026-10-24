@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { api } from "../../lib/api";
 
 type Lesson = {
@@ -56,6 +56,7 @@ export default function LessonDetailPage({ params }: { params: Promise<{ lessonI
   const [completed, setCompleted] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const openedLessonRef = useRef<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -67,7 +68,18 @@ export default function LessonDetailPage({ params }: { params: Promise<{ lessonI
         return;
       }
       try {
-        await api(`study/lessons/${id}/open`, { method: "POST" });
+        // React Strict Mode replays effects in development. Avoid issuing two
+        // concurrent progress writes for the same lesson on one page mount.
+        const shouldOpen = openedLessonRef.current !== id;
+        if (shouldOpen) {
+          openedLessonRef.current = id;
+          try {
+            await api(`study/lessons/${id}/open`, { method: "POST" });
+          } catch (reason) {
+            openedLessonRef.current = null;
+            throw reason;
+          }
+        }
         const [lesson, vocabulary, flashcards, grammar, sentences, dialogues, reading, exercises, listening] = await Promise.all([
           api<Lesson>(`lessons/${id}`),
           api<Vocabulary[]>(`lessons/${id}/vocabulary?review_status=approved`),

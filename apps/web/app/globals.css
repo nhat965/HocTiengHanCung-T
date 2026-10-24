@@ -54,7 +54,7 @@ h1 { margin:8px 0 0; font-family:var(--display); font-size:clamp(35px,5vw,64px);
 .source-tag { color:var(--sage); font-size:10px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; }
 .word-card h3 { margin:21px 0 0; font:600 25px/1.1 var(--display); }
 .word-card p { margin:8px 0 0; color:var(--muted); line-height:1.45; }
-.quick-review { display:grid; grid-template-columns:auto 1fr; gap:14px; margin-top:25px; padding:22px; background:#efe6d4; border-left:3px solid var(--accent); }
+.quick-review { display:grid; grid-template-columns:auto 1fr; gap:14px; margin-top:25px; padding:22px; background:#efe6d4; }
 .quick-review label { display:block; }
 .answer-row { display:flex; gap:8px; margin-top:11px; }
 .answer-row input { width:100%; border:1px solid var(--line); background:var(--raised); padding:11px 12px; }
@@ -92,7 +92,7 @@ h1 { margin:8px 0 0; font-family:var(--display); font-size:clamp(35px,5vw,64px);
 .book-card-footer strong,.lesson-card>a { color:var(--accent-dark); }
 .progress-track { height:6px; margin-top:20px; background:#e7dfd2; }
 .progress-track span { display:block; height:100%; background:var(--sage); }
-.resume-card { display:block; padding:16px 20px; border-left:3px solid var(--accent); background:#efe6d4; color:var(--ink); text-decoration:none; }
+.resume-card { display:block; padding:16px 20px; background:#efe6d4; color:var(--ink); text-decoration:none; }
 .lesson-card .eyebrow { display:block; }
 .lesson-card>strong { display:inline-block; margin-top:18px; color:var(--accent-dark); }
 .back-link { display:inline-block; margin-top:32px; color:var(--accent-dark); }

@@ -5,12 +5,17 @@ from app.config import get_settings
 
 
 def build_engine(database_url: str):
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+    connect_args = (
+        {"check_same_thread": False, "timeout": 30}
+        if database_url.startswith("sqlite") else {}
+    )
     engine = create_engine(database_url, connect_args=connect_args)
     if database_url.startswith("sqlite"):
         @event.listens_for(engine, "connect")
         def disable_driver_transaction_control(dbapi_connection, _connection_record) -> None:
             dbapi_connection.isolation_level = None
+            dbapi_connection.execute("PRAGMA busy_timeout=30000")
+            dbapi_connection.execute("PRAGMA journal_mode=WAL")
 
         @event.listens_for(engine, "begin")
         def emit_sqlite_begin(connection) -> None:
