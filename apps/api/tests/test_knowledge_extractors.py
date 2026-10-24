@@ -6,7 +6,18 @@ import pytest
 from sqlalchemy import func, select
 
 from app import database
-from app.models import Lesson, SourceBlock, SourceDocument, SourcePage, SourceSpan, Textbook, Vocabulary
+from app.models import (
+    AnswerKey,
+    Exercise,
+    ExerciseOption,
+    Lesson,
+    SourceBlock,
+    SourceDocument,
+    SourcePage,
+    SourceSpan,
+    Textbook,
+    Vocabulary,
+)
 from app.services.knowledge.layout import SourceTable, ordered_blocks
 from app.services.knowledge.pipeline import extract_knowledge, write_knowledge_json
 from app.services.knowledge.persistence import persist_bundle
@@ -389,6 +400,10 @@ def test_extractors_create_source_linked_fixture_records(tmp_path: Path, client)
         assert session.scalar(select(Vocabulary).where(Vocabulary.id == vocabulary.id)).headword == "Reviewed headword"
         assert first_counts["lessons"] == 1
         assert first_counts["vocabulary"] == 2
+        assert first_counts["exercise_options"] == 2
+        assert first_counts["answers"] == 1
+        assert second_counts["exercise_options"] == 0
+        assert second_counts["answers"] == 0
         lesson_id = session.scalar(select(Lesson.id))
         client_session_book_id = textbook.id
 
@@ -464,3 +479,157 @@ def test_real_layout_passages_dialogues_and_exercises_remain_source_linked():
     listening_question = next(item for item in exercises if item.listening_track_id and item.options)
     assert listening_question.listening_track_id == "CD1TRACK02"
     assert listening_question.options
+
+
+def test_exercise_golden_fixture_distinguishes_groups_questions_options_and_answers():
+    """The marker fixture is a public synthetic contract, not textbook text."""
+    raw = {
+        "source": {"page_count": 3},
+        "pages": [
+            {
+                "pdf_page_number": 1,
+                "width": 600,
+                "height": 800,
+                "blocks": [
+                    {"index": 0, "text": "EXERCISE[mc]: multiple_choice || 알맞은 답을 고르세요", "bbox": [20, 20, 500, 40]},
+                    {"index": 1, "text": "Q1: 빈칸에 알맞은 것을 고르세요.", "bbox": [20, 60, 500, 80]},
+                    {"index": 2, "text": "① 하나", "bbox": [30, 100, 200, 120]},
+                    {"index": 3, "text": "② 둘", "bbox": [30, 130, 200, 150]},
+                    {"index": 4, "text": "③ 셋", "bbox": [30, 160, 200, 180]},
+                    {"index": 5, "text": "④ 넷", "bbox": [30, 190, 200, 210]},
+                    {"index": 6, "text": "EXERCISE[fill]: fill_blank || 빈칸을 완성하세요", "bbox": [20, 240, 500, 260]},
+                    {"index": 7, "text": "Q1: 문장을 완성하세요.", "bbox": [20, 280, 500, 300]},
+                    {"index": 8, "text": "EXERCISE[match]: matching || 알맞게 연결하세요", "bbox": [20, 330, 500, 350]},
+                    {"index": 9, "text": "Q1: 단어와 뜻을 연결하세요.", "bbox": [20, 370, 500, 390]},
+                    {"index": 10, "text": "EXERCISE[order]: ordering || 문장의 순서를 정하세요", "bbox": [20, 420, 500, 440]},
+                    {"index": 11, "text": "Q1: 문장을 바르게 배열하세요.", "bbox": [20, 460, 500, 480]},
+                    {"index": 12, "text": "EXERCISE[free]: short_answer || 질문에 답하세요", "bbox": [20, 510, 500, 530]},
+                    {"index": 13, "text": "Q1: 어디에 갑니까?", "bbox": [20, 550, 500, 570]},
+                    {"index": 14, "text": "EXERCISE[multi]: multiple_choice || 두 문제를 푸세요", "bbox": [20, 600, 500, 620]},
+                    {"index": 15, "text": "Q1: 첫 번째 질문입니다.", "bbox": [20, 640, 500, 660]},
+                    {"index": 16, "text": "Q2: 두 번째 질문입니다.", "bbox": [20, 680, 500, 700]},
+                ],
+                "tables": [],
+            },
+            {
+                "pdf_page_number": 2,
+                "width": 600,
+                "height": 800,
+                "blocks": [
+                    {"index": 0, "text": "ANSWER[mc.q1]: ②", "bbox": [20, 20, 500, 40]},
+                    {"index": 1, "text": "ANSWER[fill.q1]: 문장을 완성했습니다.", "bbox": [20, 60, 500, 80]},
+                    {"index": 2, "text": "ANSWER[q1]: ambiguous", "bbox": [20, 100, 500, 120]},
+                ],
+                "tables": [],
+            },
+            {"pdf_page_number": 3, "width": 600, "height": 800, "blocks": [], "tables": []},
+        ],
+    }
+
+    bundle = extract_knowledge(raw)
+    groups = [item for item in bundle.exercises if item.parent_id is None]
+    questions = [item for item in bundle.exercises if item.parent_id is not None]
+    assert len(groups) == 6
+    assert len(questions) == 7
+    assert [item.local_id for item in questions] == [
+        "mc.q1", "fill.q1", "match.q1", "order.q1", "free.q1", "multi.q1", "multi.q2",
+    ]
+    mc = next(item for item in questions if item.local_id == "mc.q1")
+    assert mc.exercise_type == "multiple_choice"
+    assert [(item.option_index, item.text) for item in mc.options] == [
+        (1, "하나"), (2, "둘"), (3, "셋"), (4, "넷"),
+    ]
+    assert [item.source.block_index for item in mc.options] == [2, 3, 4, 5]
+    assert mc.answer == "②"
+    assert mc.answer_source is not None and mc.answer_source.pdf_page_number == 2
+    assert next(item for item in questions if item.local_id == "fill.q1").answer == "문장을 완성했습니다."
+    assert next(item for item in questions if item.local_id == "multi.q1").answer is None
+    assert next(item for item in questions if item.local_id == "multi.q2").answer is None
+    assert all(item.source.pdf_page_number in {1, 2} for item in bundle.exercises)
+    assert not any("Answer not found for exercise" in warning for warning in bundle.warnings)
+    assert any("Answer unresolved for question multi.q1" in warning for warning in bundle.warnings)
+
+
+def test_real_layout_does_not_turn_group_instructions_into_questions():
+    from app.services.knowledge.layout import SourceBlock
+    from app.services.knowledge.real_layout import extract_real_layout
+
+    def block(index: int, text: str) -> SourceBlock:
+        return SourceBlock(20, "19", index, text, (40, 50 + index * 25, 560, 70 + index * 25), 600, 800, False)
+
+    _, _, exercises = extract_real_layout([
+        block(0, "듣기"),
+        block(1, "1 대화를 듣고 알맞은 답을 고르십시오. CD1 TRACK 02"),
+        block(2, "(1) 들은 내용과 같은 것을 고르십시오. ① 하나 ② 둘"),
+        block(3, "(2) 들은 내용과 다른 것을 고르십시오."),
+        block(4, "① 보기 하나"),
+        block(5, "② 보기 둘"),
+        block(6, "2 다음 문장을 읽고 질문에 답하십시오."),
+        block(7, "(1) 중심 생각은 무엇입니까?"),
+    ])
+    groups = [item for item in exercises if item.parent_id is None]
+    questions = [item for item in exercises if item.parent_id is not None]
+    assert len(groups) == 2
+    assert len(questions) == 3
+    assert groups[0].prompt.startswith("1 대화를 듣고")
+    assert questions[0].exercise_type == "multiple_choice"
+    assert [option.option_index for option in questions[0].options] == [1, 2]
+    assert questions[0].listening_track_id == "CD1TRACK02"
+    assert [item.local_id for item in questions] == [
+        "LISTENING-P20-G1.q1", "LISTENING-P20-G1.q2", "LISTENING-P20-G2.q1",
+    ]
+
+
+def test_learner_api_never_grades_without_approved_answer_or_incomplete_options(client):
+    with database.SessionLocal() as session:
+        textbook = Textbook(owner_id="test-owner", title="Exercise safety", level="test", volume_number=91)
+        session.add(textbook)
+        session.flush()
+        lesson = Lesson(
+            textbook_id=textbook.id, ordinal=1, title="Exercises",
+            start_pdf_page=1, end_pdf_page=1, segmentation_method="fixture",
+            review_status="approved",
+        )
+        session.add(lesson)
+        session.flush()
+        incomplete = Exercise(
+            lesson_id=lesson.id, prompt="Incomplete choice", exercise_type="multiple_choice",
+            review_status="approved", group_identifier="incomplete",
+        )
+        no_answer = Exercise(
+            lesson_id=lesson.id, prompt="Choice without sourced answer", exercise_type="multiple_choice",
+            review_status="approved", group_identifier="no-answer",
+        )
+        session.add_all([incomplete, no_answer])
+        session.flush()
+        session.add_all([
+            ExerciseOption(
+                exercise_id=incomplete.id, option_index=1, text="A", review_status="approved",
+            ),
+            ExerciseOption(
+                exercise_id=no_answer.id, option_index=1, text="A", review_status="approved",
+            ),
+            ExerciseOption(
+                exercise_id=no_answer.id, option_index=2, text="B", review_status="approved",
+            ),
+        ])
+        session.commit()
+        lesson_id = lesson.id
+        incomplete_id = incomplete.id
+        no_answer_id = no_answer.id
+
+    approved_feed = client.get(f"/api/v1/lessons/{lesson_id}/exercises?review_status=approved")
+    assert approved_feed.status_code == 200
+    assert [item["id"] for item in approved_feed.json()] == [no_answer_id]
+    attempt = client.post(
+        f"/api/v1/study/exercises/{no_answer_id}/attempt",
+        json={"answer": "A"},
+    )
+    assert attempt.status_code == 200
+    assert attempt.json()["correct"] is None
+    assert attempt.json()["answer_revealed"] is None
+    incomplete_attempt = client.post(
+        f"/api/v1/study/exercises/{incomplete_id}/attempt",
+        json={"answer": "A"},
+    )
+    assert incomplete_attempt.status_code == 409

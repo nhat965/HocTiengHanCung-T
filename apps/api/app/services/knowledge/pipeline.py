@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from typing import Any
 
-from app.services.knowledge.activities import extract_activities
+from app.services.knowledge.activities import extract_activities, link_answer_keys
 from app.services.knowledge.grammar import extract_grammar
 from app.services.knowledge.layout import ordered_blocks, page_tables
 from app.services.knowledge.real_layout import extract_real_layout
@@ -114,7 +114,7 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
     if not bundle.passages:
         bundle.passages = real_passages
     if not bundle.exercises:
-        bundle.exercises = real_exercises
+        bundle.exercises = link_answer_keys(real_exercises, all_blocks)
     bundle.warnings.extend(validate_bundle(bundle, {int(page["pdf_page_number"]) for page in pages}))
     if toc_pages:
         bundle.warnings.append(
@@ -153,8 +153,10 @@ def validate_bundle(bundle: ExtractionBundle, available_pages: set[int]) -> list
         if normalized not in { "".join(char for char in item.upper() if char.isalnum()) for item in tracks_with_transcript }:
             warnings.append(f"Transcript not found for track {track.track_identifier}")
     for exercise in bundle.exercises:
-        if exercise.parent_id is None and exercise.answer is None:
-            warnings.append(f"Answer not found for exercise {exercise.local_id}")
+        if exercise.parent_id is not None and exercise.answer is None:
+            warnings.append(f"Answer unresolved for question {exercise.local_id}")
+        if exercise.parent_id is not None and exercise.exercise_type == "multiple_choice" and not exercise.options:
+            warnings.append(f"Options unresolved for question {exercise.local_id}")
     return warnings
 
 

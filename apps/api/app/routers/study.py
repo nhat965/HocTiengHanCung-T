@@ -22,6 +22,26 @@ from app.services.normalization import normalize_source_text
 
 router = APIRouter(prefix="/study", tags=["study"])
 
+_CIRCLED_DIGITS = "①②③④⑤⑥⑦⑧⑨⑩"
+_CIRCLED_LETTERS = "ⓐⓑⓒⓓⓔⓕⓖⓗⓘⓙ"
+
+
+def _choice_aliases(value: str) -> set[str]:
+    normalized = normalize_source_text(value).casefold()
+    aliases = {normalized}
+    if normalized in _CIRCLED_DIGITS:
+        index = _CIRCLED_DIGITS.index(normalized) + 1
+        aliases.update({str(index), chr(ord("a") + index - 1)})
+    elif normalized in _CIRCLED_LETTERS:
+        index = _CIRCLED_LETTERS.index(normalized) + 1
+        aliases.update({str(index), chr(ord("a") + index - 1)})
+    elif normalized.isalpha() and "a" <= normalized <= "j":
+        aliases.add(str(ord(normalized) - ord("a") + 1))
+    elif normalized.isdigit() and 1 <= int(normalized) <= 10:
+        index = int(normalized)
+        aliases.update({chr(ord("a") + index - 1), _CIRCLED_DIGITS[index - 1]})
+    return aliases
+
 
 def _approved_vocabulary(session: Session, vocabulary_id: int, owner_id: str) -> Vocabulary:
     item = session.scalar(
@@ -249,6 +269,17 @@ def submit_exercise_attempt(
     )
     if exercise is None:
         raise HTTPException(status_code=404, detail="Approved exercise not found")
+    approved_options = []
+    if exercise.exercise_type in {"multiple_choice", "single_choice"}:
+        approved_options = list(session.scalars(select(ExerciseOption).where(
+            ExerciseOption.exercise_id == exercise.id,
+            ExerciseOption.review_status == "approved",
+        ).order_by(ExerciseOption.option_index)).all())
+        if len(approved_options) < 2:
+            raise HTTPException(
+                status_code=409,
+                detail="Multiple-choice exercise is incomplete and needs review",
+            )
     answer_key = session.scalar(select(AnswerKey).where(
         AnswerKey.exercise_id == exercise.id,
         AnswerKey.review_status == "approved",
@@ -260,19 +291,15 @@ def submit_exercise_attempt(
         submitted = normalize_source_text(payload.answer).casefold()
         correct = submitted == expected
         if exercise.exercise_type in {"multiple_choice", "single_choice"}:
-            options = list(session.scalars(select(ExerciseOption).where(
-                ExerciseOption.exercise_id == exercise.id,
-                ExerciseOption.review_status == "approved",
-            )).all())
-            for option in options:
+            for option in approved_options:
                 option_text = normalize_source_text(option.text).casefold()
                 option_label = chr(ord("A") + option.option_index - 1).casefold()
-                expected_matches = expected in {
+                expected_matches = bool(_choice_aliases(expected) & {
                     option_text, str(option.option_index), option_label,
-                }
-                submitted_matches = submitted in {
+                })
+                submitted_matches = bool(_choice_aliases(submitted) & {
                     option_text, str(option.option_index), option_label,
-                }
+                })
                 if expected_matches:
                     correct = submitted_matches
                     break

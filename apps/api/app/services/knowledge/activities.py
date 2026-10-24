@@ -18,10 +18,108 @@ _READING = re.compile(r"^\s*READING(?:\[(?P<id>[\w.-]+)\])?\s*:\s*(?P<title>.*)$
 _PARAGRAPH = re.compile(r"^\s*PARAGRAPH\s*:\s*(?P<text>.*)$", re.I)
 _EXERCISE = re.compile(r"^\s*EXERCISE\[(?P<id>[\w.-]+)\]\s*:\s*(?P<kind>[\w-]+)(?:\s*\|\|\s*(?P<instruction>.*))?$", re.I)
 _QUESTION = re.compile(r"^\s*Q(?P<id>[\w.-]+)\s*:\s*(?P<prompt>.*)$", re.I)
-_OPTION = re.compile(r"^\s*(?:OPTION\s*:|\([A-D1-9]\)\s*)(?P<text>.*)$", re.I)
+_OPTION = re.compile(
+    r"^\s*(?:OPTION\s*[:：]\s*|(?:\((?P<paren>[A-Da-d1-9]|[①②③④⑤⑥⑦⑧⑨⑩]|[ⓐⓑⓒⓓ])\)|"
+    r"(?P<bare>[A-Da-d]|[①②③④⑤⑥⑦⑧⑨⑩]|[ⓐⓑⓒⓓ])[.)。：：]?\s+))(?P<text>.+)$",
+    re.I,
+)
 _ANSWER = re.compile(r"^\s*ANSWER\[(?P<id>[\w.-]+)\]\s*:\s*(?P<answer>.*)$", re.I)
 _TRACK = re.compile(r"\bCD\s*(?P<disc>\d+)\s*TRACK\s*(?P<track>\d+)\b", re.I)
 _TRANSCRIPT = re.compile(r"^\s*TRANSCRIPT\[(?P<track>[^\]]+)\]\s*:\s*(?P<text>.*)$", re.I)
+
+_TYPE_ALIASES = {
+    "multiplechoice": "multiple_choice",
+    "multiple-choice": "multiple_choice",
+    "mcq": "multiple_choice",
+    "single_choice": "multiple_choice",
+    "fill": "fill_blank",
+    "fill-in": "fill_blank",
+    "fill_in": "fill_blank",
+    "matching": "matching",
+    "match": "matching",
+    "ordering": "ordering",
+    "order": "ordering",
+    "short-answer": "short_answer",
+    "free_response": "short_answer",
+    "writing_prompt": "writing",
+    "listening": "listening_question",
+}
+_SUPPORTED_TYPES = {
+    "multiple_choice", "fill_blank", "matching", "ordering", "short_answer",
+    "writing", "listening_question", "unknown",
+}
+
+
+def normalize_exercise_type(
+    kind: str | None,
+    *,
+    instruction: str | None = None,
+    options: bool = False,
+    section: str | None = None,
+    listening_track: str | None = None,
+) -> str:
+    """Return only a supported type when the source provides enough evidence."""
+    raw = re.sub(r"\s+", "_", (kind or "").strip().casefold())
+    normalized = _TYPE_ALIASES.get(raw, raw)
+    if normalized in _SUPPORTED_TYPES and normalized != "unknown":
+        return normalized
+    instruction_text = (instruction or "").casefold()
+    if listening_track or section == "listening":
+        return "listening_question"
+    if options:
+        return "multiple_choice"
+    if any(token in instruction_text for token in ("빈칸", "fill", "điền")):
+        return "fill_blank"
+    if any(token in instruction_text for token in ("연결", "matching", "nối")):
+        return "matching"
+    if any(token in instruction_text for token in ("순서", "ordering", "sắp xếp")):
+        return "ordering"
+    if section == "writing":
+        return "writing"
+    if normalized in _SUPPORTED_TYPES:
+        return normalized
+    return "unknown"
+
+
+_CIRCLED_DIGITS = "①②③④⑤⑥⑦⑧⑨⑩"
+_CIRCLED_LETTERS = "ⓐⓑⓒⓓ"
+
+
+def option_index(label: str | None, fallback: int) -> int:
+    if not label:
+        return fallback
+    normalized = label.casefold()
+    if normalized in _CIRCLED_DIGITS:
+        return _CIRCLED_DIGITS.index(normalized) + 1
+    if normalized in _CIRCLED_LETTERS:
+        return _CIRCLED_LETTERS.index(normalized) + 1
+    if normalized.isdigit():
+        return int(normalized)
+    if normalized.isalpha() and "a" <= normalized <= "z":
+        return ord(normalized) - ord("a") + 1
+    return fallback
+
+
+def parse_inline_options(text: str, source: SourceRef) -> tuple[str, list[ExerciseOptionRecord]]:
+    """Split explicit option labels from a question prompt without guessing."""
+    pattern = re.compile(
+        rf"(?P<label>[A-Da-d]|[{_CIRCLED_DIGITS}{_CIRCLED_LETTERS}])\s*[.)。：：]?\s*"
+        rf"(?P<text>[^A-Da-d{_CIRCLED_DIGITS}{_CIRCLED_LETTERS}]+?)(?=(?:[A-Da-d]|[{_CIRCLED_DIGITS}{_CIRCLED_LETTERS}])\s*[.)。：：]?\s|$)",
+    )
+    matches = list(pattern.finditer(text))
+    if len(matches) < 2:
+        return text, []
+    options = [
+        ExerciseOptionRecord(
+            source=source,
+            option_index=option_index(match.group("label"), index + 1),
+            text=match.group("text").strip(),
+        )
+        for index, match in enumerate(matches)
+        if match.group("text").strip()
+    ]
+    prompt = text[:matches[0].start()].strip()
+    return prompt, options
 
 
 def extract_activities(
@@ -99,12 +197,16 @@ def extract_activities(
             group = exercise.group("id")
             exercise_index_by_id[group] = active_exercise
             question_index_by_group[group] = 0
+            instruction = (exercise.group("instruction") or "").strip() or None
             exercises.append(ExerciseRecord(
                 source=source,
                 local_id=group,
                 group_id=group,
-                exercise_type=exercise.group("kind").lower(),
-                instruction=(exercise.group("instruction") or "").strip() or None,
+                exercise_type=normalize_exercise_type(
+                    exercise.group("kind"), instruction=instruction,
+                ),
+                instruction=instruction,
+                prompt=instruction or "",
                 passage_id=passages[active_passage].local_id if active_passage is not None else None,
             ))
             active_dialogue = None
@@ -115,13 +217,20 @@ def extract_activities(
             question_index_by_group[group] += 1
             question_id = f"{group}.q{question.group('id')}"
             exercise_index_by_id[question_id] = len(exercises)
+            prompt, inline_options = parse_inline_options(question.group("prompt").strip(), source)
+            parent = exercises[active_exercise]
             exercises.append(ExerciseRecord(
                 source=source,
                 local_id=question_id,
                 group_id=group,
                 parent_id=group,
-                exercise_type=exercises[active_exercise].exercise_type,
-                prompt=question.group("prompt").strip(),
+                exercise_type=normalize_exercise_type(
+                    parent.exercise_type,
+                    instruction=parent.instruction,
+                    options=bool(inline_options),
+                ),
+                prompt=prompt,
+                options=inline_options,
                 passage_id=passages[active_passage].local_id if active_passage is not None else None,
             ))
             active_exercise = len(exercises) - 1
@@ -131,11 +240,19 @@ def extract_activities(
             current = exercises[active_exercise]
             choice = ExerciseOptionRecord(
                 source=source,
-                option_index=len(current.options) + 1,
+                option_index=option_index(option.group("paren") or option.group("bare"), len(current.options) + 1),
                 text=option.group("text").strip(),
             )
             exercises[active_exercise] = ExerciseRecord(
-                **{**current.__dict__, "options": [*current.options, choice]}
+                **{
+                    **current.__dict__,
+                    "options": [*current.options, choice],
+                    "exercise_type": normalize_exercise_type(
+                        current.exercise_type,
+                        instruction=current.instruction,
+                        options=True,
+                    ),
+                }
             )
             continue
         answer = _ANSWER.match(text)
@@ -162,12 +279,28 @@ def extract_activities(
                 text=transcript.group("text").strip(),
             ))
 
+    return turns, passages, _link_answer_records(exercises, answers), tracks, transcripts
+
+
+def _link_answer_records(
+    exercises: list[ExerciseRecord],
+    answers: dict[str, tuple[str, SourceRef]],
+) -> list[ExerciseRecord]:
     linked: list[ExerciseRecord] = []
     answers_by_key = {key.casefold(): value for key, value in answers.items()}
+    question_records = [record for record in exercises if record.parent_id is not None]
+    aliases: dict[str, list[ExerciseRecord]] = {}
+    for record in question_records:
+        aliases.setdefault(record.local_id.split(".")[-1].casefold(), []).append(record)
     for record in exercises:
-        candidate = answers_by_key.get(record.local_id.casefold())
+        candidate = (
+            answers_by_key.get(record.local_id.casefold())
+            if record.parent_id is not None else None
+        )
         if candidate is None:
-            candidate = answers_by_key.get(record.local_id.split(".")[-1].casefold())
+            matching = aliases.get(record.local_id.split(".")[-1].casefold(), [])
+            if record.parent_id is not None and len(matching) == 1:
+                candidate = answers_by_key.get(record.local_id.split(".")[-1].casefold())
         if candidate is None:
             linked.append(record)
             continue
@@ -177,4 +310,25 @@ def extract_activities(
             "answer": answer_text,
             "answer_source": answer_source,
         }))
-    return turns, passages, linked, tracks, transcripts
+    return linked
+
+
+def link_answer_keys(
+    exercises: list[ExerciseRecord],
+    blocks: list[SourceBlock],
+) -> list[ExerciseRecord]:
+    """Link only explicit source answer markers to question records.
+
+    A short key such as ``q1`` is accepted only when it identifies exactly one
+    question in the extracted set. When several groups contain ``q1`` the key
+    remains unresolved instead of being attached to the wrong exercise.
+    """
+    answers: dict[str, tuple[str, SourceRef]] = {}
+    for block in blocks:
+        match = _ANSWER.match(block.text.strip())
+        if match:
+            answers[match.group("id")] = (
+                match.group("answer").strip(),
+                SourceRef(block.page_number, block.printed_page_number, block.block_index),
+            )
+    return _link_answer_records(exercises, answers)

@@ -266,25 +266,31 @@ def lesson_exercises(
             Exercise.parent_exercise_id.is_not(None),
         )
     ).all())
-    return [
-        ExerciseResponse(
+    result: list[ExerciseResponse] = []
+    for item in rows:
+        options = list(session.scalars(select(ExerciseOption).where(
+            ExerciseOption.exercise_id == item.id,
+            *([ExerciseOption.review_status == "approved"] if review_status == "approved" else []),
+        ).order_by(ExerciseOption.option_index)).all())
+        # An approved multiple-choice row without a complete option set is not
+        # learner-ready. Keep it visible to review callers, but never publish it
+        # through the approved learner feed.
+        if review_status == "approved" and item.exercise_type == "multiple_choice" and len(options) < 2:
+            continue
+        result.append(ExerciseResponse(
             id=item.id,
             prompt=item.prompt,
             exercise_type=item.exercise_type,
             options=[
                 ExerciseOptionResponse(option_index=option.option_index, text=option.text)
-                for option in session.scalars(select(ExerciseOption).where(
-                ExerciseOption.exercise_id == item.id,
-                *([ExerciseOption.review_status == "approved"] if review_status == "approved" else []),
-            ).order_by(ExerciseOption.option_index)).all()
+                for option in options
             ],
             source_page_number=_source_pdf_page(session, item.source_span_id),
             review_status=item.review_status,
             parent_exercise_id=item.parent_exercise_id,
             has_children=item.id in parent_ids,
-        )
-        for item in rows
-    ]
+        ))
+    return result
 
 
 def _source_pdf_page(session: Session, source_span_id: int | None) -> int | None:

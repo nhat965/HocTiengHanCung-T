@@ -413,14 +413,15 @@ def persist_bundle(
             exercise_ids[item.local_id] = row.id
             _provenance(session, "exercise", row.id, span_id, item.extraction_method, item.extraction_version)
             for option in item.options:
-                existing = session.scalar(select(ExerciseOption.id).where(
+                option_span_id = resolve_source(option.source)
+                existing = session.scalar(select(ExerciseOption).where(
                     ExerciseOption.exercise_id == row.id,
                     ExerciseOption.option_index == option.option_index,
                 ))
                 if existing is None:
                     session.add(ExerciseOption(
                         exercise_id=row.id, option_index=option.option_index,
-                        text=option.text, source_span_id=resolve_source(option.source),
+                        text=option.text, source_span_id=option_span_id,
                     ))
                     session.flush()
                     option_id = session.scalar(select(ExerciseOption.id).where(
@@ -428,26 +429,52 @@ def persist_bundle(
                         ExerciseOption.option_index == option.option_index,
                     ))
                     counts["exercise_options"] += 1
-                    _provenance(session, "exercise_option", option_id, resolve_source(option.source), option.extraction_method, option.extraction_version)
+                    _provenance(session, "exercise_option", option_id, option_span_id, option.extraction_method, option.extraction_version)
+                elif existing.review_status not in {"approved", "reviewed"} and existing.content_origin != "human_corrected":
+                    changed = any((
+                        existing.text != option.text,
+                        existing.source_span_id != option_span_id,
+                    ))
+                    if changed:
+                        existing.text = option.text
+                        existing.source_span_id = option_span_id
+                        existing.version += 1
+                if existing is not None:
+                    _provenance(
+                        session, "exercise_option", existing.id, option_span_id,
+                        option.extraction_method, option.extraction_version,
+                    )
             if item.answer is not None and item.answer_source is not None:
                 answer_span = resolve_source(item.answer_source)
-                if answer_span is not None and session.scalar(select(AnswerKey.id).where(
-                    AnswerKey.exercise_id == row.id,
-                    AnswerKey.answer_text == item.answer,
-                    AnswerKey.source_span_id == answer_span,
-                )) is None:
-                    session.add(AnswerKey(
-                        exercise_id=row.id, answer_text=item.answer,
-                        source_span_id=answer_span, answer_index=item.local_id,
-                    ))
-                    session.flush()
-                    answer_id = session.scalar(select(AnswerKey.id).where(
+                if answer_span is not None:
+                    answer_row = session.scalar(select(AnswerKey).where(
                         AnswerKey.exercise_id == row.id,
-                        AnswerKey.answer_text == item.answer,
-                        AnswerKey.source_span_id == answer_span,
+                        AnswerKey.answer_index == item.local_id,
                     ))
-                    counts["answers"] += 1
-                    _provenance(session, "answer_key", answer_id, answer_span, item.extraction_method, item.extraction_version)
+                    if answer_row is None:
+                        answer_row = session.scalar(select(AnswerKey).where(
+                            AnswerKey.exercise_id == row.id,
+                            AnswerKey.answer_text == item.answer,
+                            AnswerKey.source_span_id == answer_span,
+                        ))
+                    if answer_row is None:
+                        answer_row = AnswerKey(
+                            exercise_id=row.id, answer_text=item.answer,
+                            source_span_id=answer_span, answer_index=item.local_id,
+                        )
+                        session.add(answer_row)
+                        session.flush()
+                        counts["answers"] += 1
+                    elif answer_row.review_status not in {"approved", "reviewed"} and answer_row.content_origin != "human_corrected":
+                        changed = any((
+                            answer_row.answer_text != item.answer,
+                            answer_row.source_span_id != answer_span,
+                        ))
+                        if changed:
+                            answer_row.answer_text = item.answer
+                            answer_row.source_span_id = answer_span
+                            answer_row.version += 1
+                    _provenance(session, "answer_key", answer_row.id, answer_span, item.extraction_method, item.extraction_version)
 
         track_ids: dict[str, int] = {}
         for item in bundle.listening_tracks:
