@@ -202,13 +202,14 @@ def extract_real_layout(
         if _looks_like_instruction(prompt) and not inline_options:
             active_group = normalize_identifier(f"{active_section}-p{block.page_number}-g{number}")
             active_question_index = None
+            group_prompt = f"{number} {prompt}"
             exercises.append(ExerciseRecord(
                 source=_source(block), local_id=active_group, group_id=active_group,
                 exercise_type=normalize_exercise_type(
-                    None, instruction=prompt, section=active_section,
+                    None, instruction=group_prompt, section=active_section,
                     listening_track=active_track,
                 ),
-                instruction=prompt, prompt=prompt,
+                instruction=group_prompt, prompt=group_prompt,
             ))
             continue
 

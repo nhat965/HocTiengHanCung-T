@@ -277,7 +277,7 @@ def lesson_exercises(
         # through the approved learner feed.
         if (
             review_status == "approved"
-            and item.parent_exercise_id is not None
+            and item.id not in parent_ids
             and item.exercise_type == "multiple_choice"
             and len(options) < 2
         ):
