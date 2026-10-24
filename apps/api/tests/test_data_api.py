@@ -1,5 +1,7 @@
 import json
 
+from sqlalchemy import select
+
 
 def _seed_knowledge():
     from app.database import SessionLocal
@@ -81,13 +83,23 @@ def test_review_workflow_and_owner_scoped_exports(client):
     )
     assert incomplete_approval.status_code == 409
 
+    missing_confirmation = client.post(
+        f"/api/v1/review/vocabulary/{vocabulary_id}",
+        json={
+            "status": "approved", "expected_version": 1, "source_span_id": span_id,
+            "reviewer_action": "compared_to_source",
+            "checks": ["source_text", "source_position"],
+        },
+    )
+    assert missing_confirmation.status_code == 422
+
     reviewed = client.post(
         f"/api/v1/review/vocabulary/{vocabulary_id}",
         json={
             "status": "approved", "note": "Compared with licensed fixture.",
             "expected_version": 1, "source_span_id": span_id,
             "reviewer_action": "compared_to_source",
-            "checks": ["source_text", "source_position", "semantic_alignment"],
+            "checks": ["source_text", "source_page", "source_position", "semantic_alignment", "structure"],
         },
     )
     assert reviewed.status_code == 200
@@ -129,6 +141,83 @@ def test_review_workflow_and_owner_scoped_exports(client):
     progress = client.get("/api/v1/study/progress").json()
     assert progress["approved_vocabulary"] == 1
     assert progress["attempts"] == 1
+
+
+def test_review_validates_lesson_provenance_and_supports_correction(client):
+    from app.database import SessionLocal
+    from app.models import ContentProvenance, ContentReview, SourceDocument, SourcePage, SourceSpan, Vocabulary
+
+    _textbook_id, _lesson_id, vocabulary_id, span_id = _seed_knowledge()
+    with SessionLocal() as session:
+        document = session.scalar(select(SourceDocument).where(SourceDocument.textbook_id == _textbook_id))
+        page = SourcePage(source_document_id=document.id, pdf_page_number=99, raw_text="sai lesson")
+        session.add(page)
+        session.flush()
+        wrong_span = SourceSpan(
+            source_page_id=page.id, label="fixture", raw_text="sai lesson",
+            normalized_text="sai lesson", confidence=1.0,
+        )
+        session.add(wrong_span)
+        session.flush()
+        session.add(ContentProvenance(
+            entity_type="vocabulary", entity_id=vocabulary_id, source_span_id=wrong_span.id,
+            extraction_method="fixture", extraction_version="structured-v1",
+        ))
+        session.commit()
+        wrong_span_id = wrong_span.id
+
+    invalid_provenance = client.post(
+        f"/api/v1/review/vocabulary/{vocabulary_id}",
+        json={
+            "status": "approved", "expected_version": 1, "source_span_id": wrong_span_id,
+            "reviewer_action": "compared_to_source",
+            "checks": ["source_text", "source_page", "source_position", "semantic_alignment", "structure"],
+        },
+    )
+    assert invalid_provenance.status_code == 422
+
+    corrected = client.post(
+        f"/api/v1/review/vocabulary/{vocabulary_id}/correction",
+        json={"expected_version": 1, "field": "headword", "value": "사과 corrected"},
+    )
+    assert corrected.status_code == 200
+    assert corrected.json()["preview"] == "사과 corrected"
+    with SessionLocal() as session:
+        row = session.get(Vocabulary, vocabulary_id)
+        assert row.headword == "사과 corrected"
+        assert row.content_origin == "human_corrected"
+        assert row.version == 2
+
+    stale = client.post(
+        f"/api/v1/review/vocabulary/{vocabulary_id}",
+        json={
+            "status": "approved", "expected_version": 1, "source_span_id": span_id,
+            "reviewer_action": "corrected",
+            "checks": ["source_text", "source_page", "source_position", "semantic_alignment", "structure"],
+        },
+    )
+    assert stale.status_code == 409
+
+    approved = client.post(
+        f"/api/v1/review/vocabulary/{vocabulary_id}",
+        json={
+            "status": "approved", "expected_version": 2, "source_span_id": span_id,
+            "reviewer_action": "corrected",
+            "checks": ["source_text", "source_page", "source_position", "semantic_alignment", "structure"],
+        },
+    )
+    assert approved.status_code == 200
+    assert approved.json()["review_status"] == "approved"
+    with SessionLocal() as session:
+        history = session.scalars(select(ContentReview).where(
+            ContentReview.entity_type == "vocabulary", ContentReview.entity_id == vocabulary_id,
+        ).order_by(ContentReview.id)).all()
+        assert len(history) == 2
+        assert history[0].reviewer_action == "corrected"
+        assert history[0].change_set["field"] == "headword"
+        assert history[0].change_set["before"] == "사과"
+        assert history[0].change_set["after"] == "사과 corrected"
+        assert history[1].status == "approved"
 
 
 def test_review_and_export_reject_cross_owner_access(client):

@@ -322,7 +322,7 @@ def test_fixture_supports_private_learning_journey(client, tmp_path):
             "expected_version": version,
             "source_span_id": source_span_id,
             "reviewer_action": "compared_to_source",
-            "checks": ["source_text", "source_position"],
+            "checks": ["source_text", "source_page", "source_position", "semantic_alignment", "structure"],
         })
         assert response.status_code == 200, response.text
 
@@ -616,7 +616,7 @@ def test_reimport_preserves_approved_knowledge_and_learning_state(client, tmp_pa
             "expected_version": version,
             "source_span_id": provenance[entity_key],
             "reviewer_action": "compared_to_source",
-            "checks": ["source_text", "source_position"],
+            "checks": ["source_text", "source_page", "source_position", "semantic_alignment", "structure"],
         })
         assert response.status_code == 200, response.text
 
@@ -730,3 +730,55 @@ def test_reimport_preserves_approved_knowledge_and_learning_state(client, tmp_pa
             for row in session.scalars(select(Exercise).order_by(Exercise.id)).all()
         ]
         assert session.scalar(select(func.count(ExerciseOption.id))) == 2
+
+
+def test_pending_human_correction_survives_reimport(client, tmp_path: Path):
+    from app.models import ContentReview
+
+    fixture = tmp_path / "pending-correction-fixture.pdf"
+    _write_structured_fixture(fixture)
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(fixture),
+        "title": "Pending correction fixture",
+        "level": "intermediate",
+        "volume_number": 5,
+        "rights_status": "authorized",
+    })
+    assert registered.status_code == 202
+    job_id = registered.json()["job_id"]
+    assert client.post(f"/api/v1/imports/{job_id}/queue").status_code == 200
+    with database.SessionLocal() as session:
+        result = run_next_job(session)
+        assert result is not None and result.state == ImportState.needs_review
+        vocabulary = session.scalar(select(Vocabulary).order_by(Vocabulary.id))
+        assert vocabulary is not None
+        vocabulary_id = vocabulary.id
+        expected_version = vocabulary.version
+
+    corrected = client.post(
+        f"/api/v1/review/vocabulary/{vocabulary_id}/correction",
+        json={"expected_version": expected_version, "field": "headword", "value": "유행 corrected"},
+    )
+    assert corrected.status_code == 200, corrected.text
+
+    with database.SessionLocal() as session:
+        job = session.get(ImportJob, job_id)
+        job.state = ImportState.queued
+        session.commit()
+        rerun = run_job(session, job)
+        assert rerun.state == ImportState.needs_review
+
+    with database.SessionLocal() as session:
+        vocabulary = session.get(Vocabulary, vocabulary_id)
+        assert vocabulary.headword == "유행 corrected"
+        assert vocabulary.content_origin == "human_corrected"
+        assert session.scalar(select(func.count(WordSense.id)).where(
+            WordSense.vocabulary_id == vocabulary_id,
+        )) == 1
+        correction = session.scalar(select(ContentReview).where(
+            ContentReview.entity_type == "vocabulary",
+            ContentReview.entity_id == vocabulary_id,
+            ContentReview.reviewer_action == "corrected",
+        ))
+        assert correction is not None
+        assert correction.change_set["after"] == "유행 corrected"

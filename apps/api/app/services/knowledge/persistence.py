@@ -208,13 +208,17 @@ def persist_bundle(
                 session.flush()
                 counts["vocabulary"] += 1
             elif row.review_status not in {"approved", "reviewed"}:
-                row.headword = item.headword
-                row.source_span_id = span_id
-                row.version += 1
+                if row.content_origin != "human_corrected":
+                    row.headword = item.headword
+                    row.source_span_id = span_id
+                    row.version += 1
             vocabulary_ids[item.normalized_headword] = row.id
             _provenance(session, "vocabulary", row.id, span_id, item.extraction_method, item.extraction_version)
             for meaning in item.meanings_vi:
-                if row.review_status in {"approved", "reviewed"}:
+                if row.review_status in {"approved", "reviewed"} or session.scalar(select(WordSense.id).where(
+                    WordSense.vocabulary_id == row.id,
+                    WordSense.content_origin == "human_corrected",
+                )) is not None:
                     continue
                 sense = session.scalar(select(WordSense).where(
                     WordSense.vocabulary_id == row.id,
@@ -259,10 +263,11 @@ def persist_bundle(
                 session.flush()
                 counts["grammar"] += 1
             elif row.review_status not in {"approved", "reviewed"}:
-                row.pattern = item.pattern
-                row.explanation_vi = item.explanation_vi
-                row.source_span_id = span_id
-                row.version += 1
+                if row.content_origin != "human_corrected":
+                    row.pattern = item.pattern
+                    row.explanation_vi = item.explanation_vi
+                    row.source_span_id = span_id
+                    row.version += 1
             grammar_ids[item.normalized_pattern] = row.id
             _provenance(session, "grammar", row.id, span_id, item.extraction_method, item.extraction_version)
 

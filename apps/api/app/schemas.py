@@ -147,7 +147,14 @@ class ReviewUpdate(BaseModel):
     expected_version: int | None = Field(default=None, ge=1)
     source_span_id: int | None = Field(default=None, ge=1)
     reviewer_action: Literal["compared_to_source", "corrected", "flagged"] | None = None
-    checks: list[Literal["source_text", "source_position", "semantic_alignment", "structure"]] = Field(default_factory=list)
+    checks: list[Literal["source_text", "source_page", "source_position", "semantic_alignment", "structure"]] = Field(default_factory=list)
+
+
+class ReviewCorrection(BaseModel):
+    expected_version: int = Field(ge=1)
+    field: Literal["headword", "meaning_vi", "pattern", "explanation_vi", "text_ko", "text_vi", "prompt"]
+    value: str = Field(min_length=1, max_length=4000)
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class ReviewRecordResponse(BaseModel):

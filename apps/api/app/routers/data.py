@@ -15,7 +15,7 @@ from app.models import (
     Sentence, SourceDocument, SourcePage, SourceSpan, Textbook, Transcript,
     Vocabulary, WordSense,
 )
-from app.schemas import ReviewRecordResponse, ReviewUpdate
+from app.schemas import ReviewCorrection, ReviewRecordResponse, ReviewUpdate
 from app.security import get_current_owner
 from app.services.data_export import SUPPORTED_DATASETS, export_dataset
 
@@ -71,29 +71,39 @@ def _preview(row) -> str:
     return f"{type(row).__name__} #{row.id}"
 
 
-def _source_projection(source_span_column):
+def _source_projection(source_span_column, owner_id: str):
     """Return scalar provenance fields that can be UNIONed into the queue."""
     if source_span_column is None:
         return literal(None).label("source_page_number"), literal(None).label("source_printed_page_number"), literal(None).label("source_text")
     return (
         select(SourcePage.pdf_page_number)
         .join(SourceSpan, SourceSpan.source_page_id == SourcePage.id)
-        .where(SourceSpan.id == source_span_column)
+        .join(SourceDocument, SourcePage.source_document_id == SourceDocument.id)
+        .where(SourceSpan.id == source_span_column, SourceDocument.owner_id == owner_id)
         .scalar_subquery()
         .label("source_page_number"),
         select(SourcePage.printed_page_number)
         .join(SourceSpan, SourceSpan.source_page_id == SourcePage.id)
-        .where(SourceSpan.id == source_span_column)
+        .join(SourceDocument, SourcePage.source_document_id == SourceDocument.id)
+        .where(SourceSpan.id == source_span_column, SourceDocument.owner_id == owner_id)
         .scalar_subquery()
         .label("source_printed_page_number"),
         select(SourceSpan.normalized_text)
-        .where(SourceSpan.id == source_span_column)
+        .join(SourcePage, SourceSpan.source_page_id == SourcePage.id)
+        .join(SourceDocument, SourcePage.source_document_id == SourceDocument.id)
+        .where(SourceSpan.id == source_span_column, SourceDocument.owner_id == owner_id)
         .scalar_subquery()
         .label("source_text"),
     )
 
 
-def _review_response(session: Session, row, entity_type: str, source_span_id: int | None) -> ReviewRecordResponse:
+def _review_response(
+    session: Session,
+    row,
+    entity_type: str,
+    source_span_id: int | None,
+    owner_id: str,
+) -> ReviewRecordResponse:
     source_page_number = None
     source_printed_page_number = None
     source_text = None
@@ -101,7 +111,8 @@ def _review_response(session: Session, row, entity_type: str, source_span_id: in
         source = session.execute(
             select(SourcePage.pdf_page_number, SourcePage.printed_page_number, SourceSpan.normalized_text)
             .join(SourceSpan, SourceSpan.source_page_id == SourcePage.id)
-            .where(SourceSpan.id == source_span_id)
+            .join(SourceDocument, SourcePage.source_document_id == SourceDocument.id)
+            .where(SourceSpan.id == source_span_id, SourceDocument.owner_id == owner_id)
         ).first()
         if source:
             source_page_number, source_printed_page_number, source_text = source
@@ -111,6 +122,71 @@ def _review_response(session: Session, row, entity_type: str, source_span_id: in
         source_span_id=source_span_id, source_page_number=source_page_number,
         source_printed_page_number=source_printed_page_number, source_text=source_text,
     )
+
+
+def _entity_lesson_id(session: Session, row) -> int | None:
+    if isinstance(row, Lesson):
+        return row.id
+    if hasattr(row, "lesson_id"):
+        return row.lesson_id
+    if isinstance(row, WordSense):
+        return session.scalar(select(Vocabulary.lesson_id).where(Vocabulary.id == row.vocabulary_id))
+    if isinstance(row, (ExerciseOption, AnswerKey)):
+        exercise_id = row.exercise_id
+        return session.scalar(select(Exercise.lesson_id).where(Exercise.id == exercise_id))
+    if isinstance(row, Transcript):
+        return session.scalar(select(ListeningTrack.lesson_id).where(ListeningTrack.id == row.listening_track_id))
+    if isinstance(row, DialogueTurn):
+        return session.scalar(select(Dialogue.lesson_id).where(Dialogue.id == row.dialogue_id))
+    return None
+
+
+def _validate_provenance(
+    session: Session,
+    row,
+    entity_type: str,
+    entity_id: int,
+    source_span_id: int,
+    owner_id: str,
+) -> None:
+    source = session.execute(
+        select(
+            SourceSpan.id,
+            SourceSpan.normalized_text,
+            SourcePage.pdf_page_number,
+            SourceDocument.owner_id,
+            SourceDocument.textbook_id,
+        )
+        .join(SourcePage, SourceSpan.source_page_id == SourcePage.id)
+        .join(SourceDocument, SourcePage.source_document_id == SourceDocument.id)
+        .where(SourceSpan.id == source_span_id)
+    ).first()
+    if source is None or source.owner_id != owner_id or not source.normalized_text.strip():
+        raise HTTPException(status_code=422, detail="Approval requires a non-empty owner-scoped source span")
+
+    lesson_id = _entity_lesson_id(session, row)
+    lesson = session.get(Lesson, lesson_id) if lesson_id is not None else None
+    if lesson is None or lesson.textbook_id != source.textbook_id:
+        raise HTTPException(status_code=422, detail="Source reference does not belong to the record lesson")
+    if (
+        lesson.start_pdf_page is not None
+        and source.pdf_page_number < lesson.start_pdf_page
+    ) or (
+        lesson.end_pdf_page is not None
+        and source.pdf_page_number > lesson.end_pdf_page
+    ):
+        raise HTTPException(status_code=422, detail="Source page does not belong to the record lesson")
+
+    provenance = session.scalar(select(ContentProvenance.id).where(
+        ContentProvenance.entity_type == entity_type,
+        ContentProvenance.entity_id == entity_id,
+        ContentProvenance.source_span_id == source_span_id,
+    ))
+    if provenance is None:
+        raise HTTPException(status_code=422, detail="Approval requires matching content provenance")
+    direct_span = getattr(row, "source_span_id", None)
+    if direct_span is not None and direct_span != source_span_id:
+        raise HTTPException(status_code=422, detail="Source reference does not match the record")
 
 
 @router.get("/review", response_model=list[ReviewRecordResponse])
@@ -133,7 +209,7 @@ def review_queue(
             model.source_span_id if hasattr(model, "source_span_id") else literal(None)
         )
         source_page_number, source_printed_page_number, source_text = _source_projection(
-            model.source_span_id if hasattr(model, "source_span_id") else None
+            model.source_span_id if hasattr(model, "source_span_id") else None, owner_id,
         )
         projection = select(
             literal(entity_type).label("entity_type"),
@@ -191,42 +267,79 @@ def update_review(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review record not found")
     current_version = int(getattr(row, "version", 1))
     source_span_id = payload.source_span_id or getattr(row, "source_span_id", None)
+    if row.review_status == "approved" and payload.status != "approved":
+        raise HTTPException(status_code=409, detail="Approved records cannot be moved without a correction workflow")
+    if payload.expected_version is None or payload.expected_version != current_version:
+        raise HTTPException(status_code=409, detail="Record version changed; reload before review")
     if payload.status == "approved":
-        if payload.expected_version is None or payload.expected_version != current_version:
-            raise HTTPException(status_code=409, detail="Record version changed; reload before approval")
         if source_span_id is None:
             raise HTTPException(status_code=422, detail="Approval requires a source reference")
         if payload.reviewer_action not in {"compared_to_source", "corrected"}:
             raise HTTPException(status_code=422, detail="Approval requires an explicit source comparison action")
-        required_checks = {"source_text", "source_position"}
+        required_checks = {"source_text", "source_page", "source_position", "semantic_alignment", "structure"}
         if not required_checks.issubset(set(payload.checks)):
-            raise HTTPException(status_code=422, detail="Approval requires source_text and source_position checks")
-        owned_span = session.scalar(
-            select(SourceSpan.id)
-            .join(SourcePage, SourceSpan.source_page_id == SourcePage.id)
-            .join(SourceDocument, SourcePage.source_document_id == SourceDocument.id)
-            .where(SourceSpan.id == source_span_id, SourceDocument.owner_id == owner_id)
-        )
-        provenance = session.scalar(select(ContentProvenance.id).where(
-            ContentProvenance.entity_type == entity_type,
-            ContentProvenance.entity_id == entity_id,
-            ContentProvenance.source_span_id == source_span_id,
-        ))
-        if owned_span is None or provenance is None:
-            raise HTTPException(status_code=422, detail="Approval requires owner-scoped provenance")
-        direct_span = getattr(row, "source_span_id", None)
-        if direct_span is not None and direct_span != source_span_id:
-            raise HTTPException(status_code=422, detail="Source reference does not match the record")
+            raise HTTPException(status_code=422, detail="Approval requires all source, page, semantic, and structure checks")
+        _validate_provenance(session, row, entity_type, entity_id, source_span_id, owner_id)
     row.review_status = payload.status
     row.version = current_version + 1
     session.add(ContentReview(
         entity_type=entity_type, entity_id=entity_id, status=payload.status,
         note=payload.note, reviewer_id=owner_id,
         source_span_id=source_span_id, entity_version=current_version,
-        reviewer_action=payload.reviewer_action, checks=payload.checks,
+        reviewer_action=payload.reviewer_action, checks=payload.checks, change_set=None,
     ))
     session.commit()
-    return _review_response(session, row, entity_type, source_span_id)
+    return _review_response(session, row, entity_type, source_span_id, owner_id)
+
+
+_CORRECTION_FIELDS = {
+    "vocabulary": {"headword"},
+    "word_sense": {"meaning_vi"},
+    "grammar": {"pattern", "explanation_vi"},
+    "sentence": {"text_ko", "text_vi"},
+    "exercise": {"prompt"},
+}
+
+
+@router.post("/review/{entity_type}/{entity_id}/correction", response_model=ReviewRecordResponse)
+def correct_review_candidate(
+    entity_type: str,
+    entity_id: int,
+    payload: ReviewCorrection,
+    session: Session = Depends(get_session),
+    owner_id: str = Depends(get_current_owner),
+) -> ReviewRecordResponse:
+    row = _owned_entity(session, entity_type, entity_id, owner_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review record not found")
+    if payload.field not in _CORRECTION_FIELDS.get(entity_type, set()):
+        raise HTTPException(status_code=422, detail="Correction field is not supported for this entity")
+    if row.review_status in {"approved", "reviewed"}:
+        raise HTTPException(status_code=409, detail="Approved records cannot be corrected in review queue")
+    current_version = int(getattr(row, "version", 1))
+    if payload.expected_version != current_version:
+        raise HTTPException(status_code=409, detail="Record version changed; reload before correction")
+    before = getattr(row, payload.field)
+    if before == payload.value:
+        return _review_response(session, row, entity_type, getattr(row, "source_span_id", None), owner_id)
+    setattr(row, payload.field, payload.value)
+    if hasattr(row, "content_origin"):
+        row.content_origin = "human_corrected"
+    row.version = current_version + 1
+    session.add(ContentReview(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        status=row.review_status,
+        note=payload.note or f"Human correction: {payload.field}",
+        reviewer_id=owner_id,
+        source_span_id=getattr(row, "source_span_id", None),
+        entity_version=current_version,
+        reviewer_action="corrected",
+        checks=[],
+        change_set={"field": payload.field, "before": before, "after": payload.value},
+    ))
+    session.commit()
+    return _review_response(session, row, entity_type, getattr(row, "source_span_id", None), owner_id)
 
 
 @router.get("/textbooks/{textbook_id}/exports/{dataset}")
