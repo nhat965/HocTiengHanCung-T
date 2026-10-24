@@ -4,7 +4,7 @@
 
 - Branch: `codex/task-07-learning-website`
 - Base: `codex/task-04-data-engine` at `22da8b4`
-- Implementation commit: pending push and CI verification.
+- Implementation commit: `0d0e9d9` (PostgreSQL CI pending).
 - Source books: six local PDFs were inventoried by metadata only. Their processing and redistribution rights are not established, so none was extracted or imported.
 - Test source: generated one-page PDF fixture with synthetic Korean/Vietnamese content. It is not textbook data.
 
