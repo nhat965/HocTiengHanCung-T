@@ -1,5 +1,6 @@
 import hashlib
 import os
+import threading
 from pathlib import Path
 
 import fitz
@@ -448,6 +449,157 @@ def test_stale_worker_jobs_are_requeued_or_failed_at_retry_limit(client):
         assert session.get(ImportJob, recoverable.id).failure_stage == "structured_persistence"
         assert session.get(ImportJob, exhausted.id).state == ImportState.failed
         assert session.get(ImportJob, exhausted.id).failure_stage == "raw_extraction"
+
+
+@pytest.mark.skipif(
+    "postgresql" not in os.environ.get("TEST_DATABASE_URL", ""),
+    reason="PostgreSQL row-locking evidence is required for concurrency tests",
+)
+def test_postgres_workers_claim_same_job_only_once(client, tmp_path: Path):
+    import fitz
+
+    source = tmp_path / "same-job-race.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "same job race fixture")
+    pdf.save(source)
+    pdf.close()
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(source), "title": "Same job race", "level": "beginner",
+        "volume_number": 1, "rights_status": "authorized",
+    }).json()
+    assert client.post(f"/api/v1/imports/{registered['job_id']}/queue").status_code == 200
+
+    barrier = threading.Barrier(2)
+    results: list[object] = []
+
+    def worker() -> None:
+        with database.SessionLocal() as session:
+            barrier.wait(timeout=10)
+            results.append(run_next_job(session))
+
+    threads = [threading.Thread(target=worker) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive()
+
+    with database.SessionLocal() as session:
+        job = session.get(ImportJob, registered["job_id"])
+        assert job.state == ImportState.needs_review
+        assert job.attempts == 1
+    assert sum(result is not None and result.state == ImportState.needs_review for result in results) == 1
+
+
+@pytest.mark.skipif(
+    "postgresql" not in os.environ.get("TEST_DATABASE_URL", ""),
+    reason="PostgreSQL row-locking evidence is required for concurrency tests",
+)
+def test_postgres_workers_process_overlapping_ranges_without_duplicate_pages(client, tmp_path: Path):
+    import fitz
+
+    source = tmp_path / "overlap-race.pdf"
+    pdf = fitz.open()
+    for page_number in range(1, 4):
+        page = pdf.new_page()
+        page.insert_text((72, 72), f"overlap page {page_number}")
+    pdf.save(source)
+    pdf.close()
+
+    jobs = []
+    for start, end in ((1, 2), (2, 3)):
+        response = client.post("/api/v1/imports", json={
+            "source_path": str(source), "title": "Overlap race", "level": "beginner",
+            "volume_number": 2, "rights_status": "authorized",
+            "page_start": start, "page_end": end,
+        })
+        assert response.status_code == 202
+        job = response.json()
+        assert client.post(f"/api/v1/imports/{job['job_id']}/queue").status_code == 200
+        jobs.append(job["job_id"])
+
+    barrier = threading.Barrier(2)
+    results: list[object] = []
+
+    def worker() -> None:
+        with database.SessionLocal() as session:
+            barrier.wait(timeout=10)
+            results.append(run_next_job(session))
+
+    threads = [threading.Thread(target=worker) for _ in jobs]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive()
+
+    from app.models import SourcePage
+    with database.SessionLocal() as session:
+        assert all(result is not None and result.state == ImportState.needs_review for result in results)
+        assert session.scalar(select(func.count(SourcePage.id))) == 3
+        assert session.scalars(select(SourcePage.pdf_page_number).order_by(SourcePage.pdf_page_number)).all() == [1, 2, 3]
+
+
+@pytest.mark.skipif(
+    "postgresql" not in os.environ.get("TEST_DATABASE_URL", ""),
+    reason="PostgreSQL lease evidence is required for concurrency tests",
+)
+def test_expired_worker_lease_cannot_commit_after_recovery(client, tmp_path: Path, monkeypatch):
+    import fitz
+    from datetime import datetime, timedelta
+
+    source = tmp_path / "stale-worker.pdf"
+    pdf = fitz.open()
+    page = pdf.new_page()
+    page.insert_text((72, 72), "stale worker fixture")
+    pdf.save(source)
+    pdf.close()
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(source), "title": "Stale worker", "level": "beginner",
+        "volume_number": 3, "rights_status": "authorized",
+    }).json()
+    assert client.post(f"/api/v1/imports/{registered['job_id']}/queue").status_code == 200
+
+    original_extract = extraction_worker.extract_knowledge
+    entered = threading.Event()
+    release = threading.Event()
+
+    def pause_after_raw(raw):
+        entered.set()
+        if not release.wait(timeout=30):
+            raise RuntimeError("test worker release timed out")
+        return original_extract(raw)
+
+    monkeypatch.setattr(extraction_worker, "extract_knowledge", pause_after_raw)
+    result_holder: dict[str, object] = {}
+
+    def worker() -> None:
+        with database.SessionLocal() as session:
+            job = session.get(ImportJob, registered["job_id"])
+            result_holder["result"] = run_job(session, job)
+
+    thread = threading.Thread(target=worker)
+    thread.start()
+    assert entered.wait(timeout=30)
+
+    with database.SessionLocal() as session:
+        job = session.get(ImportJob, registered["job_id"])
+        job.lease_expires_at = datetime.utcnow() - timedelta(minutes=1)
+        session.commit()
+        assert recover_stale_jobs(session) == 1
+        assert session.get(ImportJob, job.id).state == ImportState.queued
+
+    release.set()
+    thread.join(timeout=30)
+    assert not thread.is_alive()
+    with database.SessionLocal() as session:
+        recovered = session.get(ImportJob, registered["job_id"])
+        assert recovered.state == ImportState.queued
+        assert recovered.stage == "queued"
+    with database.SessionLocal() as session:
+        retried = run_next_job(session)
+        assert retried is not None and retried.state == ImportState.needs_review
 
 
 def test_reimport_is_idempotent_and_preserves_reviewed_records(client, tmp_path: Path):

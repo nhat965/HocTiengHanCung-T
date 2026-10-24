@@ -127,6 +127,34 @@ def test_same_pdf_supports_distinct_overlapping_ranges_and_retry(
         assert session.query(SourcePage).count() == 36
 
 
+def test_delete_document_is_blocked_while_worker_is_active(client, tmp_path):
+    import fitz
+    from datetime import datetime, timedelta
+
+    from app.database import SessionLocal
+    from app.models import ImportJob, ImportState
+
+    source = tmp_path / "active-worker.pdf"
+    pdf = fitz.open()
+    pdf.new_page()
+    pdf.save(source)
+    pdf.close()
+    registered = client.post("/api/v1/imports", json={
+        "source_path": str(source), "title": "Active worker", "level": "beginner",
+        "volume_number": 5, "rights_status": "authorized",
+    }).json()
+    document_id = registered["source_document_id"]
+    with SessionLocal() as session:
+        job = session.get(ImportJob, registered["job_id"])
+        job.state = ImportState.extracting
+        job.worker_token = "active-worker-token"
+        job.lease_expires_at = datetime.utcnow() + timedelta(minutes=30)
+        session.commit()
+
+    response = client.delete(f"/api/v1/imports/documents/{document_id}")
+    assert response.status_code == 409
+
+
 def test_private_endpoints_require_authentication(client):
     client.headers.pop("Authorization")
     response = client.get("/api/v1/textbooks")

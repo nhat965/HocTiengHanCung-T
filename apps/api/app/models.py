@@ -97,6 +97,8 @@ class ImportJob(Base):
     failure_stage: Mapped[str | None] = mapped_column(String(32), nullable=True)
     record_counts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     quality_summary: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    worker_token: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
     source_document: Mapped[SourceDocument] = relationship(back_populates="import_jobs")
 
 

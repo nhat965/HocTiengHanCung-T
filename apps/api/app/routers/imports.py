@@ -259,6 +259,20 @@ def delete_document(
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Source document not found")
 
+    active_job = session.scalar(
+        select(ImportJob)
+        .where(
+            ImportJob.source_document_id == document_id,
+            ImportJob.state == ImportState.extracting,
+        )
+        .with_for_update()
+    )
+    if active_job is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a source document while an import worker is processing it",
+        )
+
     source_path = Path(document.source_path)
     settings = get_settings()
     textbook_id = document.textbook_id
