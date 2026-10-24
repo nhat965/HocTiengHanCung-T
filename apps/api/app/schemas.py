@@ -18,6 +18,8 @@ class ImportRequest(BaseModel):
     volume_number: int = Field(ge=1, le=6)
     rights_status: Literal["unverified", "authorized", "restricted"] = "unverified"
     rights_note: str | None = Field(default=None, max_length=2000)
+    page_start: int | None = Field(default=None, ge=1)
+    page_end: int | None = Field(default=None, ge=1)
 
 
 class ImportResponse(BaseModel):
@@ -45,6 +47,10 @@ class TextbookResponse(BaseModel):
     title: str
     level: str
     volume_number: int
+    lesson_count: int = 0
+    completed_lessons: int = 0
+    progress_percent: int = 0
+    data_status: str = "empty"
 
 
 class LessonResponse(BaseModel):
@@ -54,6 +60,10 @@ class LessonResponse(BaseModel):
     start_pdf_page: int | None
     end_pdf_page: int | None
     review_status: str
+    vocabulary_count: int = 0
+    grammar_count: int = 0
+    progress_status: str = "not_started"
+    last_opened_at: datetime | None = None
 
 
 class VocabularyResponse(BaseModel):
@@ -72,14 +82,20 @@ class GrammarResponse(BaseModel):
     review_status: str
 
 
+class ExerciseOptionResponse(BaseModel):
+    option_index: int
+    text: str
+
+
 class ExerciseResponse(BaseModel):
     id: int
     prompt: str
     exercise_type: str
-    options: list[str] = Field(default_factory=list)
-    answer: str | None = None
+    options: list[ExerciseOptionResponse] = Field(default_factory=list)
     source_page_number: int | None = None
     review_status: str
+    parent_exercise_id: int | None = None
+    has_children: bool = False
 
 
 class SentenceResponse(BaseModel):
@@ -126,6 +142,10 @@ class DialogueResponse(BaseModel):
 class ReviewUpdate(BaseModel):
     status: Literal["pending_review", "approved", "rejected", "unresolved"]
     note: str | None = Field(default=None, max_length=2000)
+    expected_version: int | None = Field(default=None, ge=1)
+    source_span_id: int | None = Field(default=None, ge=1)
+    reviewer_action: Literal["compared_to_source", "corrected", "flagged"] | None = None
+    checks: list[Literal["source_text", "source_position", "semantic_alignment", "structure"]] = Field(default_factory=list)
 
 
 class ReviewRecordResponse(BaseModel):
@@ -134,6 +154,69 @@ class ReviewRecordResponse(BaseModel):
     review_status: str
     source_page_number: int | None = None
     preview: str
+    version: int
+    source_span_id: int | None = None
+
+
+class VocabularyReviewRequest(BaseModel):
+    answer_vi: str = Field(min_length=1, max_length=500)
+
+
+class VocabularyReviewResponse(BaseModel):
+    vocabulary_id: int
+    correct: bool
+    status: str
+    repetitions: int
+    interval_days: int
+    next_review_at: datetime
+
+
+class StudyProgressResponse(BaseModel):
+    approved_vocabulary: int
+    learned_vocabulary: int
+    due_vocabulary: int
+    attempts: int
+    completed_lessons: int = 0
+    total_lessons: int = 0
+    last_lesson_id: int | None = None
+    last_lesson_title: str | None = None
+
+
+class StudyFlashcardResponse(BaseModel):
+    vocabulary_id: int
+    headword: str
+    meanings_vi: list[str] = Field(default_factory=list)
+    examples: list[str] = Field(default_factory=list)
+    status: str
+    next_review_at: datetime | None = None
+
+
+class LessonProgressResponse(BaseModel):
+    lesson_id: int
+    status: str
+    completed_at: datetime | None = None
+    last_opened_at: datetime | None = None
+
+
+class ExerciseAttemptRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=1000)
+
+
+class ExerciseAttemptResponse(BaseModel):
+    attempt_id: int
+    exercise_id: int
+    correct: bool | None
+    answer_revealed: str | None = None
+
+
+class GrammarNoteRequest(BaseModel):
+    note: str = Field(max_length=4000)
+
+
+class GrammarNoteResponse(BaseModel):
+    grammar_id: int
+    note: str
+    updated_at: datetime | None = None
 
 
 class DeleteDocumentResponse(BaseModel):

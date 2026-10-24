@@ -106,3 +106,33 @@
   2 vocabulary entries, 1 grammar pattern, 1 sentence/identity, 1 passage,
   2 exercise records, and 1 listening track with transcript. This is pipeline
   evidence, not evidence that any textbook corpus is complete or accurate.
+
+## 2026-10-24 — Task 07 learning vertical slice
+
+- Added database-backed Books, Lessons, and Lesson Detail routes. The learner
+  UI loads only owner-scoped API data, shows only approved lesson sections,
+  provides vocabulary flashcards, grammar notes, dialogue/reading views, and
+  exercise submission without revealing answer keys in the exercise listing.
+- Added persistent lesson open/complete, vocabulary learned, exercise attempt,
+  grammar-note, resume, and progress API operations with Alembic migration
+  `20261024_0007`.
+- Added a signed HttpOnly web session gate in front of private API proxy routes;
+  server-side web password/session secret and API bearer token are not exposed
+  to browser JavaScript. This is a single-owner personal access gate.
+- Added an end-to-end worker/API test using a generated synthetic Korean/
+  Vietnamese PDF fixture. It persisted 1 lesson, 2 vocabulary entries, 2 word
+  senses, 1 grammar pattern, 1 example sentence, 2 dialogue turns, 1 reading
+  passage, 2 exercise records, 2 options, 1 sourced answer, 1 listening track,
+  and 1 transcript. The test reads these back through APIs, records learning
+  state, checks the quality report, and verifies deletion cleanup.
+- Validation: API tests **27 passed** on SQLite; Alembic SQLite upgrade/
+  downgrade/upgrade passed; web production build passed; web auth/proxy tests
+  **3 passed**. A production-mode browser run against an isolated FastAPI/
+  SQLite database displayed the generated lesson, flipped a Vietnamese
+  flashcard, saved vocabulary progress and a grammar note, submitted a
+  multiple-choice answer, completed the lesson, and verified persistence after
+  refresh. Local PostgreSQL was unavailable because Docker is not installed;
+  PostgreSQL 16 CI is required for merge readiness.
+- The six local PDFs remain unprocessed. Processing/distribution rights and
+  extraction accuracy have not been established. See
+  [LEARNING_VERTICAL_SLICE.md](reports/LEARNING_VERTICAL_SLICE.md).

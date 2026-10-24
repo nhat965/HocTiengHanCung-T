@@ -1,7 +1,7 @@
 """Deterministic, page-level PDF extraction. No LLM is used in this module."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 from pathlib import Path
@@ -97,6 +97,7 @@ class RawDocument:
 _KOREAN = re.compile(r"[\uac00-\ud7a3]")
 _VIETNAMESE = re.compile(r"[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]", re.I)
 _PRINTED_PAGE = re.compile(r"^\s*(?:-\s*)?(\d{1,3})(?:\s*-)?\s*$")
+_PRINTED_PAGE_WITH_LESSON = re.compile(r"(?:Bài\s*\d+\s+)?(\d{1,3})\s*$", re.I)
 _IMAGE_EXTENSION = re.compile(r"^[a-z0-9]{1,8}$", re.I)
 
 
@@ -140,6 +141,9 @@ def _printed_page(blocks: list[RawBlock], height: float) -> str | None:
         match = _PRINTED_PAGE.match(block.text)
         if match and block.y0 >= height * 0.82:
             return match.group(1)
+        contextual = _PRINTED_PAGE_WITH_LESSON.search(block.text)
+        if contextual and block.y0 >= height * 0.82:
+            return contextual.group(1)
     return None
 
 
@@ -245,6 +249,22 @@ def extract_document(path: Path, pages: range | None = None) -> RawDocument:
                 needs_ocr=needs_ocr,
                 sanitized_nul_count=sanitized_nul_count,
             ))
+        known_printed = [
+            (page.pdf_page_number, int(page.printed_page_number))
+            for page in extracted
+            if page.printed_page_number and page.printed_page_number.isdigit()
+        ]
+        if known_printed:
+            offsets = [pdf_page - printed_page for pdf_page, printed_page in known_printed]
+            dominant_offset = max(set(offsets), key=offsets.count)
+            extracted = [
+                page if page.printed_page_number else replace(
+                    page,
+                    printed_page_number=str(page.pdf_page_number - dominant_offset)
+                    if page.pdf_page_number > dominant_offset else None,
+                )
+                for page in extracted
+            ]
         return RawDocument(
             filename=path.name,
             file_size=path.stat().st_size,

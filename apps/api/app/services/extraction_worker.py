@@ -10,13 +10,13 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.models import ImportJob, ImportState, Lesson, SourceBlock, SourceDocument, SourcePage, SourceSpan
+from app.models import ImportJob, ImportState, SourceBlock, SourceDocument, SourcePage, SourceSpan
 from app.services.knowledge.persistence import persist_bundle
 from app.services.knowledge.pipeline import extract_knowledge
 from app.services.knowledge.quality import report_dict
 from app.services.pdf_engine import PdfValidationError, RawPage, extract_pages
 from app.services.pdf_importer import sha256_file
-from app.services.segmentation import DEFAULT_PROFILE, detect_lesson_boundaries, normalize_text
+from app.services.segmentation import normalize_text
 
 logger = logging.getLogger(__name__)
 STALE_JOB_TIMEOUT = timedelta(minutes=60)
@@ -214,22 +214,6 @@ def _persist_raw_pages(
                     span.raw_text = raw_row
                     span.normalized_text = normalize_text(raw_row)
 
-    existing_lessons = {
-        (lesson.ordinal, lesson.start_pdf_page)
-        for lesson in session.scalars(select(Lesson).where(Lesson.textbook_id == textbook_id)).all()
-    }
-    for boundary in detect_lesson_boundaries(page_text, DEFAULT_PROFILE):
-        key = (boundary.ordinal, boundary.pdf_page_number)
-        if key not in existing_lessons:
-            session.add(Lesson(
-                textbook_id=textbook_id,
-                ordinal=boundary.ordinal,
-                title=boundary.title,
-                start_pdf_page=boundary.pdf_page_number,
-                segmentation_method=DEFAULT_PROFILE.name,
-                review_status="pending",
-            ))
-            existing_lessons.add(key)
 
 
 def run_job(session: Session, job: ImportJob) -> ImportJob:
@@ -278,8 +262,28 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
     try:
         if sha256_file(source_path) != checksum:
             raise PdfValidationError("Source checksum does not match registration")
-        pages = extract_pages(source_path)
+        page_range = None
+        if document.page_start is not None or document.page_end is not None:
+            start = document.page_start or 1
+            end = document.page_end or document.page_count or start
+            page_range = range(start, end + 1)
+        pages = extract_pages(source_path, page_range)
         raw = _raw_document(source_document, pages)
+        document.inventory_metadata = {
+            "scope": {
+                "pdf_page_start": document.page_start or 1,
+                "pdf_page_end": document.page_end or document.page_count,
+            },
+            "printed_page_mapping": {
+                str(page.pdf_page_number): page.printed_page_number for page in pages
+            },
+            "processed_pages": len(pages),
+            "extractable_text_pages": sum(bool(page.text.strip()) for page in pages),
+            "ocr_needed_pages": [page.pdf_page_number for page in pages if page.needs_ocr],
+            "image_count": sum(page.image_count for page in pages),
+            "table_count": sum(len(page.tables) for page in pages),
+        }
+        session.commit()
 
         stage = "raw_persistence"
         _set_stage(session, job_id, stage, "Persisting raw pages, blocks, and table rows.")
@@ -289,6 +293,21 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
         stage = "structured_extraction"
         _set_stage(session, job_id, stage, "Extracting structured knowledge from persisted source pages.")
         bundle = extract_knowledge(raw)
+        document = session.get(SourceDocument, document_id)
+        inventory = dict(document.inventory_metadata or {})
+        inventory["lessons"] = [
+            {
+                "ordinal": lesson.ordinal,
+                "title": lesson.title_ko,
+                "pdf_page_start": lesson.start_pdf_page,
+                "pdf_page_end": lesson.end_pdf_page,
+            }
+            for lesson in bundle.lessons
+        ]
+        inventory["section_types"] = sorted({section.section_type for section in bundle.sections})
+        inventory["appendix_boundary"] = None
+        document.inventory_metadata = inventory
+        session.commit()
 
         stage = "validation"
         _set_stage(session, job_id, stage, "Validating source references and structured relationships.")

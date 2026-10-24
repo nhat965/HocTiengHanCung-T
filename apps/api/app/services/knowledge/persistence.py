@@ -481,6 +481,12 @@ def persist_bundle(
                     Transcript.source_span_id == span_id,
                 ))
                 _provenance(session, "transcript", transcript_id, span_id, item.extraction_method, item.extraction_version)
+        for item in bundle.exercises:
+            if not item.listening_track_id or item.local_id not in exercise_ids:
+                continue
+            track_id = track_ids.get(item.listening_track_id)
+            if track_id is not None:
+                session.get(Exercise, exercise_ids[item.local_id]).listening_track_id = track_id
     unresolved_pages = sorted({
         source.pdf_page_number
         for source, span_id in source_span_cache.items()

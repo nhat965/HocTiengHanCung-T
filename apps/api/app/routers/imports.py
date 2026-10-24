@@ -14,12 +14,14 @@ from app.models import (
     DialogueTurn,
     Exercise,
     ExerciseOption,
+    GrammarNote,
     GrammarPattern,
     ImportJob,
     ImportState,
     Lesson,
     ListeningTrack,
     LessonSection,
+    LessonProgress,
     Passage,
     Sentence,
     SentenceIdentity,
@@ -30,7 +32,9 @@ from app.models import (
     Textbook,
     Transcript,
     Vocabulary,
+    VocabularyProgress,
     WordSense,
+    StudyAttempt,
     sentence_grammar_patterns,
     sentence_vocabulary,
 )
@@ -70,6 +74,8 @@ def create_import(
     session: Session = Depends(get_session),
     owner_id: str = Depends(get_current_owner),
 ) -> ImportResponse:
+    if payload.page_start and payload.page_end and payload.page_end < payload.page_start:
+        raise HTTPException(status_code=422, detail="page_end must be greater than or equal to page_start")
     try:
         path = resolve_pdf_path(payload.source_path, get_settings().allowed_import_root)
     except ImportPathError as error:
@@ -132,6 +138,9 @@ def create_import(
         filename=path.name,
         sha256=digest,
         page_count=actual_page_count,
+        file_size=path.stat().st_size,
+        page_start=payload.page_start,
+        page_end=payload.page_end,
         source_path=str(private_path),
         rights_status=payload.rights_status,
         rights_note=payload.rights_note,
@@ -261,6 +270,9 @@ def delete_document(
         lesson_ids = list(session.scalars(select(Lesson.id).where(Lesson.textbook_id == textbook_id)))
         vocabulary_ids = list(session.scalars(select(Vocabulary.id).where(Vocabulary.lesson_id.in_(lesson_ids))))
         grammar_ids = list(session.scalars(select(GrammarPattern.id).where(GrammarPattern.lesson_id.in_(lesson_ids))))
+        session.execute(delete(GrammarNote).where(
+            GrammarNote.grammar_pattern_id.in_(grammar_ids or [-1]),
+        ))
         sentence_ids = list(session.scalars(select(Sentence.id).where(Sentence.lesson_id.in_(lesson_ids))))
         sentence_identity_ids = list(session.scalars(select(Sentence.identity_id).where(
             Sentence.id.in_(sentence_ids), Sentence.identity_id.is_not(None),
@@ -275,6 +287,16 @@ def delete_document(
         turn_ids = list(session.scalars(select(DialogueTurn.id).where(DialogueTurn.dialogue_id.in_(dialogue_ids))))
         sense_ids = list(session.scalars(select(WordSense.id).where(WordSense.vocabulary_id.in_(vocabulary_ids))))
         section_ids = list(session.scalars(select(LessonSection.id).where(LessonSection.lesson_id.in_(lesson_ids))))
+        session.execute(delete(StudyAttempt).where(
+            StudyAttempt.vocabulary_id.in_(vocabulary_ids or [-1])
+            | StudyAttempt.exercise_id.in_(exercise_ids or [-1]),
+        ))
+        session.execute(delete(VocabularyProgress).where(
+            VocabularyProgress.vocabulary_id.in_(vocabulary_ids),
+        ))
+        session.execute(delete(LessonProgress).where(
+            LessonProgress.lesson_id.in_(lesson_ids),
+        ))
         purge_entities(AnswerKey, "answer_key", answer_ids)
         purge_entities(Transcript, "transcript", transcript_ids)
         purge_entities(ExerciseOption, "exercise_option", option_ids)
