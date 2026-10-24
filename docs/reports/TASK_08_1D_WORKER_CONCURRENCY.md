@@ -51,9 +51,9 @@ PostgreSQL tooling installed. The authoritative evidence is the PostgreSQL
 GitHub Actions job for the pull request. Frontend tests/build are unchanged by
 this backend-only task.
 
-- Implementation commit: pending
-- GitHub Actions: pending
-- Pull request: pending
+- Implementation commit: `1b7fe004b9d434a5441513f1998a1c45eba0038f`
+- GitHub Actions: [run 40101629505](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40101629505)
+- Pull request: [#7](https://github.com/nhat965/HocTiengHanCung-T/pull/7)
 
 ## Remaining risks
 
