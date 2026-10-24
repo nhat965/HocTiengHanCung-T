@@ -9,4 +9,8 @@ __pycache__/
 *.sqlite3
 uploads/
 data/
+private-data/
+imports/
 coverage/
+.tools/
+docs/*.pdf
