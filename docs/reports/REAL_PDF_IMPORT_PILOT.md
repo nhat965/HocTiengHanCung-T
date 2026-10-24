@@ -87,11 +87,11 @@ creating duplicates. The job remained `needs_review`.
 - API suite: 27 tests passed locally on SQLite after the pilot database
   connection was configured with a busy timeout and WAL mode.
 - Web production build: passed (`npm run build:web`).
-- Existing PostgreSQL CI evidence: migration upgrade/downgrade and API
-  integration passed in run
-  [40073698597](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40073698597)
-  on the Task 07 branch. This is CI evidence, not a local Task 08 PostgreSQL
-  run.
+- Task 08 branch CI: migration upgrade/downgrade, PostgreSQL API integration,
+  dependency audit, and web build all passed in run
+  [40076450656](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40076450656)
+  at commit `6dbdabeeb84d9d104122a0f60a68cd698b6ade02`. This is hosted CI
+  evidence, not a local PostgreSQL service.
 - The private pilot database and evidence JSON remain under the Git-ignored
   `private-data/pilot-a/` directory.
 
@@ -110,3 +110,9 @@ creating duplicates. The job remained `needs_review`.
 The next safe gate is to repeat this exact job against PostgreSQL, compare the
 same approved sample, and attach a PostgreSQL evidence record before expanding
 the import range.
+
+## Git handoff
+
+- Pilot implementation/report commit: `9bf33143869a326f0460ba407d69de5747dbd4f8`.
+- CI trigger commit: `6dbdabeeb84d9d104122a0f60a68cd698b6ade02`.
+- Branch: `codex/task-08-real-pdf-import`.
