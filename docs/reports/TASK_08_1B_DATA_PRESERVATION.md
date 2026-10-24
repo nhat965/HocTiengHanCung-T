@@ -41,15 +41,14 @@ chạy cùng suite.
 ## Kết quả
 
 - Local API suite: **29 passed**.
-- PostgreSQL 16 CI: chạy trên commit sau khi push; URL và SHA được cập nhật ở
-  phần Git handoff bên dưới.
+- PostgreSQL 16 CI: passed in run [40096399990](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40096399990) trên commit `ae991ad799a221358be821c23d895ca2afe310a1`.
 - Không sử dụng dữ liệu giáo trình riêng tư trong fixture.
 
 ## Git handoff
 
 - Branch: `codex/task-08-real-pdf-import`
-- Commit: cập nhật sau khi commit/push Task 08.1B.
-- CI: cập nhật sau khi GitHub Actions hoàn tất.
+- Commit: `ae991ad799a221358be821c23d895ca2afe310a1`.
+- CI: [GitHub Actions run 40096399990](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40096399990).
 
 ## Rủi ro còn lại
 
