@@ -54,10 +54,13 @@ source block.
 
 - Local API tests: unavailable in this checkout because Python/PostgreSQL are
   not installed.
-- Local web tests/build: pending.
-- PostgreSQL 16 GitHub Actions: pending.
-- Implementation commit: pending
-- Pull request: pending
+- Local web tests/build: `npm test -- --run` and `npm run build` passed.
+- PostgreSQL 16 GitHub Actions: 37 tests passed, 1 skipped in [run 40109242474](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40109242474).
+- Implementation commits: `adc87ecebbc4da74cc5b0157aa0dc04a006897c0`,
+  `87adcda39f66127f6dd4abd357952a7a9179d555`,
+  `0a4d9abcafd05b824eacca4a5f8fc1c3e8a891a2`,
+  `2aa3714818816f601cba50ae9cf86195455a45ab`.
+- Pull request: [#8](https://github.com/nhat965/HocTiengHanCung-T/pull/8)
 
 The private Trung cấp 4 PDF is not present in this workspace. Consequently no
 new real-PDF pilot counts are claimed. The previous pilot's 67 records must not
