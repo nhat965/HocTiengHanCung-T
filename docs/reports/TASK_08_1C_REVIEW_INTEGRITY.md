@@ -53,13 +53,14 @@
 
 - Frontend review checks: **2 passed**.
 - Frontend production build: **passed**.
-- API/PostgreSQL: chờ GitHub Actions sau khi push.
+- API/PostgreSQL: **passed** — [run 40098737958](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40098737958).
 - Không sử dụng dữ liệu giáo trình riêng tư trong fixture.
 
 ## Git handoff
 
 - Branch: `codex/task-08-real-pdf-import`
-- Commit/CI: cập nhật sau khi GitHub Actions hoàn tất.
+- Implementation commit: `457d03fabbdbb3e796d2d92fdf21d3e49157c711`.
+- CI: [GitHub Actions run 40098737958](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40098737958).
 - Không tự merge; dừng sau Task 08.1C.
 
 ## Hạn chế còn lại
