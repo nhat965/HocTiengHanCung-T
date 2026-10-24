@@ -64,10 +64,10 @@ def normalize_exercise_type(
     if normalized in _SUPPORTED_TYPES and normalized != "unknown":
         return normalized
     instruction_text = (instruction or "").casefold()
-    if listening_track or section == "listening":
-        return "listening_question"
     if options:
         return "multiple_choice"
+    if listening_track or section == "listening":
+        return "listening_question"
     if any(token in instruction_text for token in ("빈칸", "fill", "điền")):
         return "fill_blank"
     if any(token in instruction_text for token in ("연결", "matching", "nối")):
