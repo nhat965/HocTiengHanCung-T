@@ -99,8 +99,8 @@ creating duplicates. The job remained `needs_review`.
 - Web production build: passed (`npm run build:web`).
 - Task 08 branch CI: migration upgrade/downgrade, PostgreSQL API integration,
   dependency audit, and web build all passed in run
-  [40076551460](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40076551460)
-  at commit `c89cd84`. This is hosted CI
+  [40077326169](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40077326169)
+  at commit `c58476e`. This is hosted CI
   evidence, not a local PostgreSQL service.
 - The private pilot database and evidence JSON remain under the Git-ignored
   `private-data/pilot-a/` directory.
@@ -125,5 +125,5 @@ the import range.
 
 - Pilot implementation/report commits: `9bf33143869a326f0460ba407d69de5747dbd4f8`,
   followed by the source-backed review queue and corrected extraction evidence.
-- CI trigger/report commit: `c89cd84` (latest passing run above).
+- CI trigger/report commit: `c58476e` (latest passing run above).
 - Branch: `codex/task-08-real-pdf-import`.
