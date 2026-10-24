@@ -2,7 +2,7 @@ name: Korean knowledge data engine
 
 on:
   pull_request:
-    branches: [master, codex/task-03-structured-knowledge, codex/task-04-data-engine]
+    branches: [master, codex/task-03-structured-knowledge, codex/task-04-data-engine, codex/task-08-1e-exercise-extraction]
   push:
     branches: [codex/task-03-structured-knowledge, codex/task-04-data-engine, codex/task-07-learning-website, codex/task-08-real-pdf-import]
   workflow_dispatch:
@@ -70,5 +70,7 @@ jobs:
       - run: npm ci
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
+      - name: Test private web session and proxy
+        run: npm run test:web -- --run
       - name: Build frontend
         run: npm run build:web
