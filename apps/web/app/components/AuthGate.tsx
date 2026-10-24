@@ -76,6 +76,7 @@ export default function AuthGate({ children }: Readonly<{ children: React.ReactN
     <>
       <div className="session-bar">
         <Link href="/books">Thư viện</Link>
+        <Link href="/review">Duyệt dữ liệu</Link>
         <span>Không gian học riêng tư</span>
         <button type="button" onClick={signOut}>Đăng xuất</button>
       </div>

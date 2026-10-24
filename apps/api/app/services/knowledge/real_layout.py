@@ -18,7 +18,9 @@ _KOREAN = re.compile(r"[\uac00-\ud7a3]")
 _TRACK = re.compile(r"\bCD\s*(\d+)\s*TRACK\s*(\d+)\b", re.I)
 _QUESTION = re.compile(r"^\s*(?:\((?P<child>\d+)\)|(?P<group>\d+)\s+)(?P<text>.+)$", re.S)
 _OPTION = re.compile(r"[ⓐⓑⓒⓓ]\s*([^ⓐⓑⓒⓓ]+)")
-_SPEAKER = re.compile(r"^\s*(?P<speaker>A|B)\s*(?P<text>.*)$")
+_SPEAKER = re.compile(
+    r"^\s*(?P<speaker>A|B)(?:\s*[:：]\s*|\s+)(?P<text>[\uac00-\ud7a3].*)$"
+)
 _SECTION_LABELS = {
     "기본 어휘": "vocabulary",
     "기본 문법": "grammar",
@@ -67,8 +69,8 @@ def extract_real_layout(
         if active_section in {"grammar", "speaking"} and speaker:
             speaker_name = speaker.group("speaker")
             turn_text = speaker.group("text").strip()
-            if not turn_text:
-                pending_speaker = (speaker_name, block)
+            if not turn_text or not _KOREAN.search(turn_text):
+                pending_speaker = None
                 continue
             if dialogue_group is None or (speaker_name == "A" and dialogue_turn_index >= 2):
                 dialogue_group = f"{active_section}-p{block.page_number}-d{len(dialogues) + 1}"

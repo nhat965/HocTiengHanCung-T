@@ -34,7 +34,7 @@ pilot was persisted to PostgreSQL.
 | Vocabulary | 59 | 59 word senses persisted; 10 manually reviewed/approved |
 | Grammar patterns | 3 | all 3 manually reviewed/approved |
 | Example sentences | 24 | source spans retained; learner API exposes approved examples |
-| Dialogue groups / turns | 7 / 25 | order and source spans retained |
+| Dialogue groups / turns | 6 / 17 | order and source spans retained; non-dialogue headings filtered |
 | Reading passages | 4 | source spans retained |
 | Exercises | 67 | 3 manually reviewed/approved for the learner UI |
 | Exercise options | 0 | no options were invented |
@@ -47,6 +47,12 @@ and a retry budget of three. Remaining candidates stay pending and are not
 shown in the learner tabs. Approval calls required source span, expected
 version, reviewer action, and structural/semantic checks; no bulk auto-approve
 was used.
+
+The private review queue is available at `/review`. Each candidate displays the
+candidate text beside the exact source text, PDF page, source span, and version.
+Approval submits the source reference and comparison checks; unresolved records
+remain out of the learner view. The queue is paginated and does not provide a
+bulk-approve action.
 
 ## Quality review
 
@@ -62,6 +68,10 @@ provenance, ordering, and lesson membership. No answer was inferred when the
 source did not provide one. The pilot still needs a larger manually labelled
 ground-truth set before full-book import; layout-heavy tables, transcript
 matching, and OCR are not validated by this pilot.
+
+The six-volume lesson/TOC metadata index is recorded in
+[`SOURCE_LESSON_INDEX.md`](SOURCE_LESSON_INDEX.md). It is an audit aid, not a
+license to publish the textbook contents.
 
 ## API and website acceptance
 
@@ -89,8 +99,8 @@ creating duplicates. The job remained `needs_review`.
 - Web production build: passed (`npm run build:web`).
 - Task 08 branch CI: migration upgrade/downgrade, PostgreSQL API integration,
   dependency audit, and web build all passed in run
-  [40076450656](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40076450656)
-  at commit `6dbdabeeb84d9d104122a0f60a68cd698b6ade02`. This is hosted CI
+  [40076551460](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40076551460)
+  at commit `c89cd84`. This is hosted CI
   evidence, not a local PostgreSQL service.
 - The private pilot database and evidence JSON remain under the Git-ignored
   `private-data/pilot-a/` directory.
@@ -113,6 +123,7 @@ the import range.
 
 ## Git handoff
 
-- Pilot implementation/report commit: `9bf33143869a326f0460ba407d69de5747dbd4f8`.
-- CI trigger commit: `6dbdabeeb84d9d104122a0f60a68cd698b6ade02`.
+- Pilot implementation/report commits: `9bf33143869a326f0460ba407d69de5747dbd4f8`,
+  followed by the source-backed review queue and corrected extraction evidence.
+- CI trigger/report commit: `c89cd84` (latest passing run above).
 - Branch: `codex/task-08-real-pdf-import`.

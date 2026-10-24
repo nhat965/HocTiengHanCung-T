@@ -117,6 +117,19 @@ h1 { margin:8px 0 0; font-family:var(--display); font-size:clamp(35px,5vw,64px);
 .exercise-options { display:grid; gap:9px; }
 .exercise-options label { display:flex; align-items:flex-start; gap:10px; padding:10px; border:1px solid var(--line); background:#fffefa; }
 .exercise-answer { max-width:480px; padding:11px; border:1px solid var(--line); }
+.review-list { display:grid; gap:16px; margin-top:28px; }
+.review-card { padding:22px; border:1px solid var(--line); background:var(--raised); }
+.review-card-head,.review-actions,.review-pagination { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.review-card h2 { margin:12px 0 18px; font:600 24px/1.2 var(--display); }
+.review-evidence { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.review-evidence>div { padding:14px; background:#f4ecdf; border:1px solid var(--line); }
+.review-evidence strong { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--accent-dark); }
+.review-evidence p { margin:8px 0 0; line-height:1.55; white-space:pre-wrap; }
+.review-actions { justify-content:flex-start; margin-top:18px; }
+.secondary-button { border:1px solid var(--line); padding:10px 14px; background:var(--raised); color:var(--ink); font-weight:600; }
+.secondary-button:disabled,.primary-button:disabled { cursor:not-allowed; opacity:.5; }
+.review-pagination { justify-content:flex-start; margin-top:24px; }
+@media (max-width:600px){.review-evidence{grid-template-columns:1fr}}
 @media (max-width:600px){.lesson-card-meta,.book-card-footer{align-items:flex-start;flex-direction:column}}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important;transition:none!important}}
 @media (max-width:900px){.learning-shell{grid-template-columns:1fr}.library-panel{border-right:0;border-bottom:1px solid var(--line);padding:20px}.library-panel>.eyebrow{margin-top:20px}.book-list{grid-template-columns:repeat(2,minmax(0,1fr))}.privacy-note{display:none}.learning-workspace{padding:25px 22px 50px}.study-header{align-items:flex-start;flex-direction:column}.lesson-layout{grid-template-columns:1fr;gap:22px}.lesson-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.lesson-list>.eyebrow{grid-column:1/-1}.word-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}

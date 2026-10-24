@@ -71,6 +71,48 @@ def _preview(row) -> str:
     return f"{type(row).__name__} #{row.id}"
 
 
+def _source_projection(source_span_column):
+    """Return scalar provenance fields that can be UNIONed into the queue."""
+    if source_span_column is None:
+        return literal(None).label("source_page_number"), literal(None).label("source_printed_page_number"), literal(None).label("source_text")
+    return (
+        select(SourcePage.pdf_page_number)
+        .join(SourceSpan, SourceSpan.source_page_id == SourcePage.id)
+        .where(SourceSpan.id == source_span_column)
+        .scalar_subquery()
+        .label("source_page_number"),
+        select(SourcePage.printed_page_number)
+        .join(SourceSpan, SourceSpan.source_page_id == SourcePage.id)
+        .where(SourceSpan.id == source_span_column)
+        .scalar_subquery()
+        .label("source_printed_page_number"),
+        select(SourceSpan.normalized_text)
+        .where(SourceSpan.id == source_span_column)
+        .scalar_subquery()
+        .label("source_text"),
+    )
+
+
+def _review_response(session: Session, row, entity_type: str, source_span_id: int | None) -> ReviewRecordResponse:
+    source_page_number = None
+    source_printed_page_number = None
+    source_text = None
+    if source_span_id is not None:
+        source = session.execute(
+            select(SourcePage.pdf_page_number, SourcePage.printed_page_number, SourceSpan.normalized_text)
+            .join(SourceSpan, SourceSpan.source_page_id == SourcePage.id)
+            .where(SourceSpan.id == source_span_id)
+        ).first()
+        if source:
+            source_page_number, source_printed_page_number, source_text = source
+    return ReviewRecordResponse(
+        entity_type=entity_type, entity_id=row.id,
+        review_status=row.review_status, preview=_preview(row), version=row.version,
+        source_span_id=source_span_id, source_page_number=source_page_number,
+        source_printed_page_number=source_printed_page_number, source_text=source_text,
+    )
+
+
 @router.get("/review", response_model=list[ReviewRecordResponse])
 def review_queue(
     session: Session = Depends(get_session),
@@ -90,6 +132,9 @@ def review_queue(
         source_span_column = (
             model.source_span_id if hasattr(model, "source_span_id") else literal(None)
         )
+        source_page_number, source_printed_page_number, source_text = _source_projection(
+            model.source_span_id if hasattr(model, "source_span_id") else None
+        )
         projection = select(
             literal(entity_type).label("entity_type"),
             model.id.label("entity_id"),
@@ -97,6 +142,9 @@ def review_queue(
             cast(func.coalesce(preview_column, ""), String).label("preview"),
             model.version.label("version"),
             source_span_column.label("source_span_id"),
+            source_page_number,
+            source_printed_page_number,
+            source_text,
         )
         if model is DialogueTurn:
             projection = projection.join(Dialogue).join(Lesson).join(Textbook).where(
@@ -178,11 +226,7 @@ def update_review(
         reviewer_action=payload.reviewer_action, checks=payload.checks,
     ))
     session.commit()
-    return ReviewRecordResponse(
-        entity_type=entity_type, entity_id=entity_id,
-        review_status=row.review_status, preview=_preview(row), version=row.version,
-        source_span_id=source_span_id,
-    )
+    return _review_response(session, row, entity_type, source_span_id)
 
 
 @router.get("/textbooks/{textbook_id}/exports/{dataset}")

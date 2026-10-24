@@ -153,6 +153,8 @@ class ReviewRecordResponse(BaseModel):
     entity_id: int
     review_status: str
     source_page_number: int | None = None
+    source_printed_page_number: str | None = None
+    source_text: str | None = None
     preview: str
     version: int
     source_span_id: int | None = None

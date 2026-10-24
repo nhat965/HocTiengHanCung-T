@@ -72,6 +72,9 @@ def test_review_workflow_and_owner_scoped_exports(client):
     queued = client.get("/api/v1/review?review_status=pending")
     assert queued.status_code == 200
     assert any(item["entity_type"] == "vocabulary" and item["entity_id"] == vocabulary_id for item in queued.json())
+    vocabulary_queue_item = next(item for item in queued.json() if item["entity_type"] == "vocabulary")
+    assert vocabulary_queue_item["source_page_number"] == 1
+    assert vocabulary_queue_item["source_text"] == "사과 quả táo"
 
     incomplete_approval = client.post(
         f"/api/v1/review/vocabulary/{vocabulary_id}", json={"status": "approved"},
@@ -89,6 +92,8 @@ def test_review_workflow_and_owner_scoped_exports(client):
     )
     assert reviewed.status_code == 200
     assert reviewed.json()["review_status"] == "approved"
+    assert reviewed.json()["source_page_number"] == 1
+    assert reviewed.json()["source_text"] == "사과 quả táo"
 
     exported = client.get(f"/api/v1/textbooks/{textbook_id}/exports/vocabulary")
     assert exported.status_code == 200

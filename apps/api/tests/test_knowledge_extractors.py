@@ -446,6 +446,8 @@ def test_real_layout_passages_dialogues_and_exercises_remain_source_linked():
         block(0, "말하기"),
         block(1, "A 안녕하세요."),
         block(2, "B 반갑습니다."),
+        block(12, "Bài 01 19"),
+        block(13, "."),
         block(3, "1 사진을 보고 이야기해 보십시오."),
         block(4, "읽기", 11),
         block(5, "한국어를 배우는 사람들은 여러 가지 방법으로 매일 연습합니다. " * 3, 11),
