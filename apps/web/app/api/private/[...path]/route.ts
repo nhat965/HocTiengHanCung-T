@@ -9,16 +9,25 @@ function hasValidSession(request: NextRequest): boolean {
   const value = request.cookies.get(sessionCookieName)?.value;
   if (!secret || !value) return false;
   const [expiresAt, signature, extra] = value.split(".");
-  if (!expiresAt || !signature || extra !== undefined || Number(expiresAt) <= Date.now()) return false;
+  if (!expiresAt || !signature || extra !== undefined || !/^\d{13}$/.test(expiresAt) || Number(expiresAt) <= Date.now()) return false;
   const expected = createHmac("sha256", secret).update(expiresAt).digest();
-  const supplied = Buffer.from(signature, "base64url");
-  return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  if (!/^[A-Za-z0-9_-]+$/.test(signature)) return false;
+  try {
+    const supplied = Buffer.from(signature, "base64url");
+    return supplied.length === expected.length && timingSafeEqual(supplied, expected);
+  } catch {
+    return false;
+  }
 }
 
 async function forward(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
+  // A catch-all route must never be able to escape the configured API prefix.
+  if (!path.length || path.some((segment) => !/^[A-Za-z0-9_-]+$/.test(segment))) {
+    return NextResponse.json({ detail: "Invalid private API path" }, { status: 400 });
+  }
   const token = process.env.PRIVATE_API_TOKEN;
-  const target = new URL(`${apiBase}/${path.join("/")}`);
+  const target = new URL(`${apiBase.replace(/\/$/, "")}/${path.join("/")}`);
   request.nextUrl.searchParams.forEach((value, key) => target.searchParams.append(key, value));
   const isHealth = path.length === 1 && path[0] === "health";
   if (!isHealth && !hasValidSession(request)) {
