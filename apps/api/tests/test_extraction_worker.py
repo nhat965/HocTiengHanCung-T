@@ -729,7 +729,7 @@ def test_heartbeat_failure_fails_closed_before_persistence(client, tmp_path: Pat
     pdf.close()
     registered = client.post("/api/v1/imports", json={
         "source_path": str(source), "title": "Heartbeat failure", "level": "beginner",
-        "volume_number": 7, "rights_status": "authorized",
+        "volume_number": 4, "rights_status": "authorized",
     }).json()
     assert client.post(f"/api/v1/imports/{registered['job_id']}/queue").status_code == 200
 
