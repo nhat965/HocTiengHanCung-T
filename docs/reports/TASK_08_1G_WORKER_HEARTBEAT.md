@@ -55,14 +55,19 @@ overlapping page ranges, lease expiry and retry recovery.
 ## Test results
 
 Local API tests were not available because this checkout has no Python runtime
-or PostgreSQL service. The authoritative PostgreSQL 16 and migration results
-will be recorded here from GitHub Actions after the branch CI run completes.
+or PostgreSQL service. GitHub Actions PostgreSQL 16 evidence passed:
+
+- `40 passed, 1 skipped` in the API suite.
+- Alembic `upgrade head`, `downgrade base`, `upgrade head` passed.
+- Frontend dependency audit and production build passed.
+- The skipped test is the existing non-PostgreSQL-specific conditional test;
+  all heartbeat tests ran on PostgreSQL.
 
 ## Commit and CI
 
-- Commit SHA: pending
-- Pull Request: pending
-- GitHub Actions: pending
+- Commits: `e75a36e` (heartbeat implementation), `6cacb2e` (regression test fix)
+- Pull Request: [#10](https://github.com/nhat965/HocTiengHanCung-T/pull/10)
+- GitHub Actions: [run 40112370893](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40112370893)
 
 ## Remaining risks
 
