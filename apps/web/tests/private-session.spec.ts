@@ -75,6 +75,31 @@ describe("private web session", () => {
     });
   });
 
+
+  it("rejects malformed signed cookies without contacting the upstream API", async () => {
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]"));
+    const context = { params: Promise.resolve({ path: ["textbooks"] }) };
+    for (const cookie of ["9999999999999.!invalid", "not-a-timestamp.abc", "9999999999999.abc.def", "9999999999999.%"]) {
+      const response = await proxyGet(request("/api/private/textbooks", {
+        headers: { Cookie: `learning_session=${cookie}` },
+      }), context);
+      expect(response.status).toBe(401);
+    }
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid proxy path segments before constructing the upstream URL", async () => {
+    const upstream = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]"));
+    const cookie = await signInCookie();
+    for (const segments of [["..", "health"], ["https:", "example.com"], [""], ["textbooks", "1?admin=true"]]) {
+      const response = await proxyGet(request("/api/private/textbooks", {
+        headers: { Cookie: `learning_session=${cookie.value}` },
+      }), { params: Promise.resolve({ path: segments }) });
+      expect(response.status).toBe(400);
+    }
+    expect(upstream).not.toHaveBeenCalled();
+  });
+
   it("clears the session cookie on sign-out", async () => {
     const response = await DELETE();
     expect(response.status).toBe(200);
