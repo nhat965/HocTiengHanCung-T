@@ -57,6 +57,8 @@ class SourceDocument(Base):
     sha256: Mapped[str] = mapped_column(String(64))
     page_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     file_size: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Deprecated legacy range columns; new registrations keep these null and
+    # store the requested range on ImportJob instead.
     page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
     page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     inventory_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -71,9 +73,20 @@ class SourceDocument(Base):
 
 class ImportJob(Base):
     __tablename__ = "import_jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_document_id", "page_start", "page_end",
+            name="uq_import_jobs_document_range",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     source_document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    # The source file is identified by SourceDocument; each job owns one
+    # requested processing range. These are nullable only for legacy jobs
+    # created before range ownership moved from SourceDocument.
+    page_start: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    page_end: Mapped[int | None] = mapped_column(Integer, nullable=True)
     state: Mapped[ImportState] = mapped_column(SqlEnum(ImportState), default=ImportState.queued)
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

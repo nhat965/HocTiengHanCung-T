@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -57,6 +57,8 @@ def _job_response(job: ImportJob) -> ImportJobResponse:
     return ImportJobResponse(
         id=job.id,
         source_document_id=job.source_document_id,
+        page_start=job.page_start,
+        page_end=job.page_end,
         state=job.state,
         stage=job.stage,
         failure_stage=job.failure_stage,
@@ -86,6 +88,8 @@ def create_import(
     except (PdfValidationError, RuntimeError) as error:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
     digest = sha256_file(path)
+    page_start = payload.page_start or 1
+    page_end = payload.page_end or actual_page_count
     existing = session.scalar(
         select(SourceDocument).where(
             SourceDocument.owner_id == owner_id,
@@ -94,10 +98,35 @@ def create_import(
     )
     if existing:
         latest_job = session.scalar(
-            select(ImportJob).where(ImportJob.source_document_id == existing.id).order_by(ImportJob.id.desc())
+            select(ImportJob).where(
+                ImportJob.source_document_id == existing.id,
+                or_(
+                    and_(
+                        ImportJob.page_start == page_start,
+                        ImportJob.page_end == page_end,
+                    ),
+                    # Jobs created before 0008 had no job-owned range. Treat
+                    # a null range as the full document for compatibility.
+                    and_(
+                        ImportJob.page_start.is_(None),
+                        ImportJob.page_end.is_(None),
+                        existing.page_count == page_end,
+                        page_start == 1,
+                    ),
+                ),
+            ).order_by(ImportJob.id.desc())
         )
+        already_imported = latest_job is not None
         if latest_job is None:
-            latest_job = ImportJob(source_document_id=existing.id, state=ImportState.registered, message="Registered; not queued for extraction.")
+            # Reuse the private bytes and SourceDocument, but create a job for
+            # the newly requested range.
+            latest_job = ImportJob(
+                source_document_id=existing.id,
+                page_start=page_start,
+                page_end=page_end,
+                state=ImportState.registered,
+                message="Registered; not queued for extraction.",
+            )
             session.add(latest_job)
             session.commit()
             session.refresh(latest_job)
@@ -105,7 +134,7 @@ def create_import(
             job_id=latest_job.id,
             source_document_id=existing.id,
             state=latest_job.state,
-            already_imported=True,
+            already_imported=already_imported,
         )
 
     textbook = session.scalar(select(Textbook).where(
@@ -139,8 +168,10 @@ def create_import(
         sha256=digest,
         page_count=actual_page_count,
         file_size=path.stat().st_size,
-        page_start=payload.page_start,
-        page_end=payload.page_end,
+        # Page ranges belong to ImportJob. The nullable fields on
+        # SourceDocument are retained only for pre-0008 legacy rows.
+        page_start=None,
+        page_end=None,
         source_path=str(private_path),
         rights_status=payload.rights_status,
         rights_note=payload.rights_note,
@@ -149,6 +180,8 @@ def create_import(
     session.flush()
     job = ImportJob(
         source_document_id=document.id,
+        page_start=page_start,
+        page_end=page_end,
         state=ImportState.registered,
         message="Document registered. Queue extraction explicitly to begin processing.",
     )

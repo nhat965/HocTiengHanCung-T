@@ -263,16 +263,23 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
         if sha256_file(source_path) != checksum:
             raise PdfValidationError("Source checksum does not match registration")
         page_range = None
-        if document.page_start is not None or document.page_end is not None:
-            start = document.page_start or 1
-            end = document.page_end or document.page_count or start
+        # Range belongs to this import job. Fall back to the old document
+        # fields only for jobs created before the range migration.
+        start = job.page_start or document.page_start or 1
+        end = job.page_end or document.page_end or document.page_count or start
+        if (
+            job.page_start is not None
+            or job.page_end is not None
+            or document.page_start is not None
+            or document.page_end is not None
+        ):
             page_range = range(start, end + 1)
         pages = extract_pages(source_path, page_range)
         raw = _raw_document(source_document, pages)
         document.inventory_metadata = {
             "scope": {
-                "pdf_page_start": document.page_start or 1,
-                "pdf_page_end": document.page_end or document.page_count,
+                "pdf_page_start": start,
+                "pdf_page_end": end,
             },
             "printed_page_mapping": {
                 str(page.pdf_page_number): page.printed_page_number for page in pages
@@ -336,6 +343,7 @@ def run_job(session: Session, job: ImportJob) -> ImportJob:
             total_pages=source_document.page_count or len(pages),
         )
         summary["persistence"] = counts
+        summary["scope"] = {"pdf_page_start": start, "pdf_page_end": end}
         summary["text_sanitization"] = {
             "nul_replacements": sum(page.sanitized_nul_count for page in pages),
         }

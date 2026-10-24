@@ -32,6 +32,8 @@ class ImportResponse(BaseModel):
 class ImportJobResponse(BaseModel):
     id: int
     source_document_id: int
+    page_start: int | None = None
+    page_end: int | None = None
     state: ImportState
     stage: str
     failure_stage: str | None = None

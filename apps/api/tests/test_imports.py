@@ -35,6 +35,98 @@ def test_import_is_idempotent_for_same_pdf_bytes(client, tmp_path):
         assert "private" in Path(document.source_path).parts
 
 
+def test_same_pdf_supports_distinct_overlapping_ranges_and_retry(
+    client, tmp_path, monkeypatch,
+):
+    """A file is shared by jobs, while each job owns one extraction range."""
+    import fitz
+
+    from app import database
+    from app.models import ImportJob, ImportState, SourceDocument, SourcePage
+    from app.services import extraction_worker
+
+    source = tmp_path / "multi-range.pdf"
+    pdf = fitz.open()
+    for page_number in range(1, 54):
+        page = pdf.new_page()
+        page.insert_text((72, 72), f"Fixture page {page_number}")
+    pdf.save(source)
+    pdf.close()
+
+    def register(start: int, end: int) -> dict:
+        response = client.post("/api/v1/imports", json={
+            "source_path": str(source),
+            "title": "Multi-range fixture",
+            "level": "intermediate",
+            "volume_number": 4,
+            "rights_status": "authorized",
+            "page_start": start,
+            "page_end": end,
+        })
+        assert response.status_code == 202, response.text
+        return response.json()
+
+    first = register(18, 35)
+    second = register(36, 53)
+    overlap = register(30, 40)
+    same_first = register(18, 35)
+
+    assert first["already_imported"] is False
+    assert second["already_imported"] is False
+    assert overlap["already_imported"] is False
+    assert same_first["already_imported"] is True
+    assert first["source_document_id"] == second["source_document_id"] == overlap["source_document_id"]
+    assert len({first["job_id"], second["job_id"], overlap["job_id"]}) == 3
+
+    for registration in (first, second):
+        queued = client.post(f"/api/v1/imports/{registration['job_id']}/queue")
+        assert queued.status_code == 200, queued.text
+
+    with database.SessionLocal() as session:
+        document = session.get(SourceDocument, first["source_document_id"])
+        assert document is not None
+        assert document.page_start is None and document.page_end is None
+        results = [extraction_worker.run_next_job(session) for _ in range(2)]
+        assert all(result is not None and result.state == ImportState.needs_review for result in results)
+        assert {
+            (result.page_start, result.page_end)
+            for result in results
+        } == {(18, 35), (36, 53)}
+        pages = list(session.query(SourcePage).order_by(SourcePage.pdf_page_number))
+        assert len(pages) == 36
+        assert [page.pdf_page_number for page in pages] == list(range(18, 54))
+
+    same_after_success = register(18, 35)
+    assert same_after_success["already_imported"] is True
+    assert same_after_success["job_id"] == first["job_id"]
+
+    queued_overlap = client.post(f"/api/v1/imports/{overlap['job_id']}/queue")
+    assert queued_overlap.status_code == 200, queued_overlap.text
+
+    original_extract_pages = extraction_worker.extract_pages
+
+    def fail_once(*args, **kwargs):
+        raise RuntimeError("temporary fixture failure")
+
+    monkeypatch.setattr(extraction_worker, "extract_pages", fail_once)
+    with database.SessionLocal() as session:
+        failed = extraction_worker.run_next_job(session)
+        assert failed is not None
+        assert failed.state == ImportState.failed
+        assert failed.failure_stage == "raw_extraction"
+
+    monkeypatch.setattr(extraction_worker, "extract_pages", original_extract_pages)
+    retry = client.post(f"/api/v1/imports/{overlap['job_id']}/queue")
+    assert retry.status_code == 200
+    with database.SessionLocal() as session:
+        completed = extraction_worker.run_next_job(session)
+        assert completed is not None
+        assert completed.state == ImportState.needs_review
+        assert completed.page_start == 30
+        assert completed.page_end == 40
+        assert session.query(SourcePage).count() == 36
+
+
 def test_private_endpoints_require_authentication(client):
     client.headers.pop("Authorization")
     response = client.get("/api/v1/textbooks")
