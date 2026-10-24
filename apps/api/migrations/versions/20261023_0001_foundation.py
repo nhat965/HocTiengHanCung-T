@@ -56,6 +56,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_import_jobs_source_document_id", table_name="import_jobs")
     op.drop_table("import_jobs")
+    if op.get_bind().dialect.name == "postgresql":
+        op.execute("DROP TYPE IF EXISTS importstate")
     op.drop_index("ix_source_documents_textbook_id", table_name="source_documents")
     op.drop_table("source_documents")
     op.drop_table("textbooks")
