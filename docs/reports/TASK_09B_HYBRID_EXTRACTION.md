@@ -164,7 +164,7 @@ an environment/deployment concern.
 ## 12. Commit and CI
 
 - Base: Task 09A pilot commit `c6a9c01`.
-- Task 09B commit SHA: pending push.
+- Task 09B implementation commit SHA: `e904acb`.
 - Pull request: pending GitHub authentication.
 - GitHub Actions URL: pending push.
 
