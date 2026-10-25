@@ -120,9 +120,9 @@ recorded below after push.
 
 ## Integration PR and final CI
 
-- Integration report commit: pending.
-- Integration PR: pending.
-- PostgreSQL 16 / frontend CI: pending.
+- Integration report commit: `f8dc7d6`.
+- Integration PR: [#12](https://github.com/nhat965/HocTiengHanCung-T/pull/12).
+- PostgreSQL 16 / frontend CI: [run 40199756651](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40199756651) - both jobs passed.
 
 ## Remaining issues and merge order
 
