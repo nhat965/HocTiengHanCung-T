@@ -165,8 +165,9 @@ an environment/deployment concern.
 
 - Base: Task 09A pilot commit `c6a9c01`.
 - Task 09B implementation commit SHA: `e904acb`.
-- Pull request: pending GitHub authentication.
-- GitHub Actions URL: pending push.
+- Report metadata commit SHA: `24a80cc`.
+- Pull request: [#11](https://github.com/nhat965/HocTiengHanCung-T/pull/11).
+- GitHub Actions run: [40191194510](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40191194510) (PostgreSQL 16 and web build passed).
 
 ## 13. Remaining issues
 
