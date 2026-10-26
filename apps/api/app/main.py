@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_session
-from app.routers import data, imports, study, textbooks
+from app.routers import answer_resolution, data, imports, study, textbooks
 from app.schemas import HealthResponse
 
 
@@ -23,6 +23,7 @@ def create_app() -> FastAPI:
     app.include_router(textbooks.router, prefix="/api/v1")
     app.include_router(textbooks.lesson_router, prefix="/api/v1")
     app.include_router(data.router, prefix="/api/v1")
+    app.include_router(answer_resolution.router, prefix="/api/v1")
     app.include_router(study.router, prefix="/api/v1")
 
     @app.get("/api/v1/health", response_model=HealthResponse, tags=["system"])
