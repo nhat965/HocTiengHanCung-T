@@ -107,6 +107,8 @@ free-response prompt into an automatically gradeable answer.
 - `apps/web/app/review/page.tsx` — source-evidence review controls and a
   required approval checklist.
 - `apps/api/tests/test_answer_resolution.py` — resolver regressions.
+- `.github/workflows/task-03.yml` — run the existing PostgreSQL/API and web
+  CI jobs for every pull request, rather than only an obsolete branch allowlist.
 
 ## Regression coverage and results
 
@@ -134,8 +136,10 @@ Local verification completed before commit:
 
 Docker is not installed in this local environment, so PostgreSQL 16 validation
 is delegated to the existing GitHub Actions `api-postgres` job after the branch
-is pushed.  The CI URL and commit SHA are recorded in the pull request rather
-than fabricating a successful local PostgreSQL result.
+is pushed.  The workflow's former pull-request branch allowlist would have
+silently skipped this Task 12 PR, so it is removed as a small CI-only fix.  The
+CI URL and commit SHA are recorded in the pull request rather than fabricating
+a successful local PostgreSQL result.
 
 ## Remaining risks
 
