@@ -138,8 +138,16 @@ Docker is not installed in this local environment, so PostgreSQL 16 validation
 is delegated to the existing GitHub Actions `api-postgres` job after the branch
 is pushed.  The workflow's former pull-request branch allowlist would have
 silently skipped this Task 12 PR, so it is removed as a small CI-only fix.  The
-CI URL and commit SHA are recorded in the pull request rather than fabricating
-a successful local PostgreSQL result.
+Task 12 CI completed successfully for commit
+`5cccfca553af1f820183c191df094d5dffc90f23`:
+
+- [API/PostgreSQL 16 job](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40262869881/job/121378785157)
+  — successful.
+- [Web tests and production build](https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40262869881/job/121378785431)
+  — successful.
+
+The report-only commit following this section preserves the same validated
+implementation and triggers the final PR check on the branch head.
 
 ## Remaining risks
 
