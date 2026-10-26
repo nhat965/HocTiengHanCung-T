@@ -169,6 +169,40 @@ class ReviewRecordResponse(BaseModel):
     source_span_id: int | None = None
 
 
+class AnswerResolutionReviewRequest(BaseModel):
+    action: Literal["confirm", "reject", "select"]
+    expected_version: int = Field(ge=1)
+    question_context_id: int | None = Field(default=None, ge=1)
+    note: str | None = Field(default=None, max_length=2000)
+
+
+class AnswerResolutionApproveRequest(BaseModel):
+    expected_version: int = Field(ge=1)
+    note: str | None = Field(default=None, max_length=2000)
+    checks: list[Literal["source_text", "source_page", "source_position", "semantic_alignment", "structure"]] = Field(default_factory=list)
+
+
+class AnswerResolutionResponse(BaseModel):
+    id: int
+    status: str
+    compound_key: str | None = None
+    lesson_number: int | None = None
+    skill_section: str | None = None
+    exercise_group: str | None = None
+    question_number: str | None = None
+    question_context_id: int | None = None
+    exercise_id: int | None = None
+    question_prompt: str | None = None
+    question_page_number: int | None = None
+    question_source_span_id: int | None = None
+    answer_text: str
+    answer_page_number: int | None = None
+    answer_source_span_id: int | None = None
+    match_reason: str | None = None
+    reviewer_note: str | None = None
+    version: int
+
+
 class VocabularyReviewRequest(BaseModel):
     answer_vi: str = Field(min_length=1, max_length=500)
 

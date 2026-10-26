@@ -373,6 +373,57 @@ class AnswerKey(Base):
     content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
 
 
+class ExerciseAnswerContext(Base):
+    """A reviewer-visible compound identifier for a source-backed question."""
+    __tablename__ = "exercise_answer_contexts"
+    __table_args__ = (
+        UniqueConstraint("source_document_id", "compound_key", name="uq_exercise_answer_contexts_document_key"),
+        UniqueConstraint("exercise_id", name="uq_exercise_answer_contexts_exercise"),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    exercise_id: Mapped[int] = mapped_column(ForeignKey("exercises.id"), index=True)
+    volume_number: Mapped[int] = mapped_column(Integer)
+    lesson_number: Mapped[int] = mapped_column(Integer)
+    skill_section: Mapped[str] = mapped_column(String(64))
+    exercise_group: Mapped[str] = mapped_column(String(64))
+    question_number: Mapped[str] = mapped_column(String(64))
+    compound_key: Mapped[str] = mapped_column(String(384), index=True)
+    question_source_span_id: Mapped[int] = mapped_column(ForeignKey("source_spans.id"))
+    review_status: Mapped[str] = mapped_column(String(32), default="extracted")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
+
+
+class AnswerResolutionCandidate(Base):
+    """An appendix answer candidate. It is never a learner answer until approved."""
+    __tablename__ = "answer_resolution_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_document_id", "compound_key", "answer_source_span_id", "answer_text",
+            name="uq_answer_resolution_candidates_source_key_text",
+        ),
+    )
+    id: Mapped[int] = mapped_column(primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(128), index=True)
+    source_document_id: Mapped[int] = mapped_column(ForeignKey("source_documents.id"), index=True)
+    question_context_id: Mapped[int | None] = mapped_column(ForeignKey("exercise_answer_contexts.id"), nullable=True, index=True)
+    volume_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lesson_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    skill_section: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    exercise_group: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    question_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    compound_key: Mapped[str | None] = mapped_column(String(384), nullable=True, index=True)
+    answer_text: Mapped[str] = mapped_column(Text)
+    answer_source_span_id: Mapped[int | None] = mapped_column(ForeignKey("source_spans.id"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="extracted", index=True)
+    match_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewer_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class ContentReview(Base):
     __tablename__ = "content_reviews"
     id: Mapped[int] = mapped_column(primary_key=True)
