@@ -68,6 +68,19 @@ def _source_span_id(
 def _provenance(session: Session, kind: str, entity_id: int, span_id: int | None, method: str, version: str) -> None:
     if span_id is None:
         return
+    # SessionLocal deliberately disables autoflush.  A bundle can legitimately
+    # mention the same persisted option more than once; keep an unflushed
+    # provenance row from being scheduled twice in that single transaction.
+    if any(
+        isinstance(row, ContentProvenance)
+        and row.entity_type == kind
+        and row.entity_id == entity_id
+        and row.source_span_id == span_id
+        and row.extraction_method == method
+        and row.extraction_version == version
+        for row in session.new
+    ):
+        return
     present = session.scalar(select(ContentProvenance.id).where(
         ContentProvenance.entity_type == kind,
         ContentProvenance.entity_id == entity_id,

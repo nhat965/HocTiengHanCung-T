@@ -20,7 +20,7 @@ type Passage = { id: number; title: string | null; text: string; source_page_num
 type Dialogue = { id: number; topic: string | null; turns: { turn_index: number; speaker: string | null; text_ko: string; text_vi: string | null }[] };
 type Listening = { id: number; track_identifier: string; audio_status: string; transcript_available: boolean; source_page_number: number | null };
 type Option = { option_index: number; text: string };
-type Exercise = { id: number; prompt: string; exercise_type: string; options: Option[]; source_page_number: number | null; has_children: boolean };
+type Exercise = { id: number; prompt: string; exercise_type: string; options: Option[]; source_page_number: number | null; has_children: boolean; interaction_config: { blank_count?: number; translation_direction?: string } };
 type Tab = "overview" | "vocabulary" | "grammar" | "examples" | "dialogue" | "reading" | "practice" | "listening";
 type LessonContent = {
   lesson: Lesson;
@@ -52,6 +52,7 @@ export default function LessonDetailPage({ params }: { params: Promise<{ lessonI
   const [cardFlipped, setCardFlipped] = useState(false);
   const [activityMessage, setActivityMessage] = useState("");
   const [answers, setAnswers] = useState<Record<number, string>>({});
+  const [blankAnswers, setBlankAnswers] = useState<Record<number, string[]>>({});
   const [results, setResults] = useState<Record<number, string>>({});
   const [completed, setCompleted] = useState(false);
   const [error, setError] = useState("");
@@ -150,18 +151,23 @@ export default function LessonDetailPage({ params }: { params: Promise<{ lessonI
   async function submitExercise(event: FormEvent<HTMLFormElement>, exercise: Exercise) {
     event.preventDefault();
     try {
-      const result = await api<{ correct: boolean | null; answer_revealed: string | null }>(
+      const submitted = exercise.exercise_type === "fill_blank" && (exercise.interaction_config.blank_count ?? 1) > 1
+        ? (blankAnswers[exercise.id] ?? []).join("\n")
+        : (answers[exercise.id] ?? "");
+      const result = await api<{ correct: boolean | null; answer_revealed: string | null; grading_status: "graded" | "reference_available" | "pending_review" }>(
         `study/exercises/${exercise.id}/attempt`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ answer: answers[exercise.id] ?? "" }),
+          body: JSON.stringify({ answer: submitted }),
         },
       );
       setResults((current) => ({
         ...current,
-        [exercise.id]: result.correct === null
-          ? "Đã lưu câu trả lời; đáp án chưa được kiểm duyệt."
+        [exercise.id]: result.grading_status === "reference_available"
+          ? `Đã lưu bài dịch; chưa tự chấm.${result.answer_revealed ? ` Bản dịch tham khảo: ${result.answer_revealed}` : ""}`
+          : result.correct === null
+          ? "Đã lưu câu trả lời; đang chờ kiểm duyệt, chưa có kết quả đúng/sai."
           : `${result.correct ? "Chính xác." : "Chưa chính xác."}${result.answer_revealed ? ` Đáp án: ${result.answer_revealed}` : ""}`,
       }));
     } catch (reason) {
@@ -205,7 +211,7 @@ export default function LessonDetailPage({ params }: { params: Promise<{ lessonI
 
       {tab === "reading" && <section className="content-section"><h2>Đọc hiểu</h2>{content.reading.map((item) => <article className="knowledge-card" key={item.id}><h3>{item.title || "Bài đọc"}</h3><p className="reading-text">{item.text}</p><span className="source-tag">Trang PDF {item.source_page_number ?? "?"}</span></article>)}</section>}
 
-      {tab === "practice" && <section className="content-section"><h2>Luyện tập</h2>{content.exercises.map((exercise, index) => <form className="exercise-card" key={exercise.id} onSubmit={(event) => submitExercise(event, exercise)}><span className="eyebrow">Câu {index + 1} · {exercise.exercise_type}</span><h3>{exercise.prompt || "Chọn đáp án phù hợp"}</h3>{exercise.options.length ? <div className="exercise-options">{exercise.options.map((option) => <label key={option.option_index}><input type="radio" name={`exercise-${exercise.id}`} value={option.option_index} checked={answers[exercise.id] === String(option.option_index)} onChange={(event) => setAnswers((current) => ({ ...current, [exercise.id]: event.target.value }))} required /><span>{option.text}</span></label>)}</div> : <input className="exercise-answer" aria-label={`Câu trả lời ${index + 1}`} value={answers[exercise.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [exercise.id]: event.target.value }))} required />}<button className="primary-button" type="submit">Nộp câu trả lời</button>{results[exercise.id] && <p className="feedback" role="status">{results[exercise.id]}</p>}</form>)}</section>}
+      {tab === "practice" && <section className="content-section"><h2>Luyện tập</h2>{content.exercises.map((exercise, index) => <form className="exercise-card" key={exercise.id} onSubmit={(event) => submitExercise(event, exercise)}><span className="eyebrow">Câu {index + 1} · {exercise.exercise_type}</span><h3>{exercise.prompt || "Chọn đáp án phù hợp"}</h3>{exercise.source_page_number && <span className="source-tag">Trang PDF {exercise.source_page_number}</span>}{exercise.options.length ? <div className="exercise-options">{exercise.options.map((option) => <label key={option.option_index}><input type="radio" name={`exercise-${exercise.id}`} value={option.option_index} checked={answers[exercise.id] === String(option.option_index)} onChange={(event) => setAnswers((current) => ({ ...current, [exercise.id]: event.target.value }))} required /><span>{option.text}</span></label>)}</div> : exercise.exercise_type === "fill_blank" && (exercise.interaction_config.blank_count ?? 1) > 1 ? <div className="exercise-blanks">{Array.from({ length: exercise.interaction_config.blank_count ?? 1 }, (_, blankIndex) => <label key={blankIndex}>Ô trống {blankIndex + 1}<input className="exercise-answer" aria-label={`Câu trả lời ${index + 1}, ô trống ${blankIndex + 1}`} value={(blankAnswers[exercise.id] ?? [])[blankIndex] ?? ""} onChange={(event) => setBlankAnswers((current) => { const next = [...(current[exercise.id] ?? [])]; next[blankIndex] = event.target.value; return { ...current, [exercise.id]: next }; })} required /></label>)}</div> : exercise.exercise_type === "translation_ko_vi" || exercise.exercise_type === "translation_vi_ko" || exercise.exercise_type === "free_response" ? <textarea className="exercise-answer" aria-label={`Câu trả lời ${index + 1}`} value={answers[exercise.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [exercise.id]: event.target.value }))} required /> : <input className="exercise-answer" aria-label={`Câu trả lời ${index + 1}`} value={answers[exercise.id] ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [exercise.id]: event.target.value }))} required />}<button className="primary-button" type="submit">Nộp câu trả lời</button>{results[exercise.id] && <p className="feedback" role="status">{results[exercise.id]}</p>}</form>)}</section>}
 
       {tab === "listening" && <section className="content-section"><h2>Listening metadata</h2>{content.listening.map((item) => <article className="knowledge-card" key={item.id}><h3>Track {item.track_identifier}</h3><p>Âm thanh: {item.audio_status} · Transcript: {item.transcript_available ? "có nguồn" : "chưa có"}</p><span className="source-tag">Trang PDF {item.source_page_number ?? "?"}</span></article>)}</section>}
       <Link className="back-link" href="/">← Thư viện sách</Link>

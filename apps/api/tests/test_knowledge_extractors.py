@@ -210,6 +210,41 @@ def test_appendix_pages_do_not_extend_final_lesson_but_transcripts_are_kept():
     assert any("Excluded appendix pages from lesson segmentation: 3-3" in warning for warning in bundle.warnings)
 
 
+def test_vietnamese_answer_key_heading_excludes_appendix_from_lessons():
+    raw = {
+        "source": {"page_count": 2},
+        "pages": [
+            {
+                "pdf_page_number": 1,
+                "width": 600,
+                "height": 800,
+                "blocks": [{"index": 0, "text": "01 유행", "bbox": [50, 80, 200, 100]}],
+                "tables": [],
+            },
+            {
+                "pdf_page_number": 2,
+                "width": 600,
+                "height": 800,
+                "blocks": [
+                    {
+                        "index": 0, "text": "Đáp án", "bbox": [50, 30, 200, 50],
+                        "is_header_footer_candidate": True,
+                    },
+                    {"index": 1, "text": "02 집안일", "bbox": [50, 80, 200, 100]},
+                ],
+                "tables": [],
+            },
+        ],
+    }
+
+    bundle = extract_knowledge(raw)
+
+    assert [(item.ordinal, item.title_ko, item.start_pdf_page, item.end_pdf_page) for item in bundle.lessons] == [
+        (1, "유행", 1, 1)
+    ]
+    assert any("Excluded appendix pages from lesson segmentation: 2-2" in warning for warning in bundle.warnings)
+
+
 def test_extractors_create_source_linked_fixture_records(tmp_path: Path, client):
     raw = {
         "schema_version": 1,

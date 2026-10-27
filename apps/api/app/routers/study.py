@@ -299,7 +299,8 @@ def submit_exercise_attempt(
         )
     correct: bool | None = None
     revealed: str | None = None
-    if answer_key is not None:
+    grading_status = "pending_review"
+    if answer_key is not None and exercise.exercise_type in {"fill_blank", "multiple_choice", "single_choice"}:
         expected = normalize_source_text(answer_key.answer_text).casefold()
         submitted = normalize_source_text(payload.answer).casefold()
         correct = submitted == expected
@@ -317,6 +318,12 @@ def submit_exercise_attempt(
                     correct = submitted_matches
                     break
         revealed = answer_key.answer_text
+        grading_status = "graded"
+    elif answer_key is not None and exercise.exercise_type in {"translation_ko_vi", "translation_vi_ko"}:
+        # A sourced reference can be shown, but translation is not exact-string
+        # graded until a separate assessment policy exists.
+        revealed = answer_key.answer_text
+        grading_status = "reference_available"
     attempt = StudyAttempt(
         owner_id=owner_id, exercise_id=exercise.id,
         response=payload.answer, correct=correct,
@@ -327,6 +334,7 @@ def submit_exercise_attempt(
     return ExerciseAttemptResponse(
         attempt_id=attempt.id, exercise_id=exercise.id,
         correct=correct, answer_revealed=revealed,
+        grading_status=grading_status,
     )
 
 

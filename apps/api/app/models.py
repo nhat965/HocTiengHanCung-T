@@ -316,6 +316,7 @@ class Exercise(Base):
     extraction_version: Mapped[str] = mapped_column(String(64), default="structured-v1")
     version: Mapped[int] = mapped_column(Integer, default=1)
     content_origin: Mapped[str] = mapped_column(String(32), default="source_extracted")
+    interaction_config: Mapped[dict] = mapped_column(JSON, default=dict)
 
 
 class ExerciseOption(Base):
