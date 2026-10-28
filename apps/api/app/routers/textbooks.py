@@ -294,6 +294,7 @@ def lesson_exercises(
             review_status=item.review_status,
             parent_exercise_id=item.parent_exercise_id,
             has_children=item.id in parent_ids,
+            interaction_config=item.interaction_config or {},
         ))
     return result
 

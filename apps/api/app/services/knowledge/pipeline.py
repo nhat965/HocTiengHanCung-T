@@ -20,7 +20,7 @@ from app.services.knowledge.vocabulary import extract_vocabulary
 _TOC_MARKER = re.compile(r"(?:목차|차례|mục\s*lục|contents)", re.I)
 _APPENDIX_TITLE = re.compile(
     r"^(?:부록(?:\s+\d+)?|정답(?:\s+및\s+해설)?|듣기\s*대본|대본|"
-    r"모범\s*답안|answer\s*key|transcripts?)\s*[:：]?$",
+    r"모범\s*답안|đáp\s*án|answer\s*key|transcripts?)\s*[:：]?$",
     re.I,
 )
 
@@ -42,8 +42,7 @@ def extract_knowledge(raw_document: dict[str, Any]) -> ExtractionBundle:
             page_number
             for page_number, blocks in blocks_by_page.items()
             if any(
-                not block.is_header_footer_candidate
-                and _APPENDIX_TITLE.fullmatch(" ".join(block.text.split()))
+                _APPENDIX_TITLE.fullmatch(" ".join(block.text.split()))
                 for block in blocks
             )
         ),

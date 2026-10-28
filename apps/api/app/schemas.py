@@ -98,6 +98,7 @@ class ExerciseResponse(BaseModel):
     review_status: str
     parent_exercise_id: int | None = None
     has_children: bool = False
+    interaction_config: dict = Field(default_factory=dict)
 
 
 class SentenceResponse(BaseModel):
@@ -252,6 +253,7 @@ class ExerciseAttemptResponse(BaseModel):
     exercise_id: int
     correct: bool | None
     answer_revealed: str | None = None
+    grading_status: Literal["graded", "reference_available", "pending_review"]
 
 
 class GrammarNoteRequest(BaseModel):
