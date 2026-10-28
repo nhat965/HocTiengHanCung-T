@@ -138,5 +138,9 @@ substitute for PostgreSQL CI.
 
 - Branch: `codex/task-12-1-lesson01-acceptance`
 - Implementation commit: `63bd952e810f63dee4287c1709bb140afb51d1d3`
-- Pull request and final CI URLs: pending GitHub authentication and branch push.
+- Audit-report commit: `629460342a291e307b9ac2e3598589825344619e`
+- Draft PR: https://github.com/nhat965/HocTiengHanCung-T/pull/15
+- PostgreSQL 16 job: https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40626493246/job/122612535677
+- Web test/build job: https://github.com/nhat965/HocTiengHanCung-T/actions/runs/40626493246/job/122612535867
+- Both required jobs completed successfully. The PR remains unmerged for review.
 
